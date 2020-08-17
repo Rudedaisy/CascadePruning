@@ -37,7 +37,17 @@ class PruneLinear(nn.Module):
         with pruned connections.
         --------------Your Code---------------------
         """
-        pass
+        # get bounds
+        max = torch.max(torch.abs(self.linear.weight.data))
+        min = torch.min(torch.abs(self.linear.weight.data))
+        # calculate cutoff
+        cutoff = ((max - min) * (q / 100.0)) + min
+        # generate mask
+        self.mask = torch.abs(self.linear.weight.data) > cutoff
+        # prune the weights
+        self.linear.weight.data = self.linear.weight.float() * self.mask.float()
+        # calculate sparsity
+        self.sparsity = self.linear.weight.data.numel() - self.linear.weight.data.nonzero().size(0)
 
 
     def prune_by_std(self, s=0.25):
@@ -55,7 +65,15 @@ class PruneLinear(nn.Module):
         with pruned connections.
         --------------Your Code---------------------
         """
-        pass
+        # generate mask
+        self.mask = torch.abs(self.linear.weight.data) >= (torch.std(self.linear.weight.data)*s)
+        # prune the weights
+        self.linear.weight.data = self.linear.weight.data.float() * self.mask.float()
+        # calculate sparsity
+        self.sparsity = self.linear.weight.data.numel() - self.linear.weight.data.nonzero().size(0)
+        
+        #print("WEIGHTS: ",self.linear.weight.data)
+        #print("MASK: ",self.mask)
 
 class PrunedConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=False):
@@ -81,10 +99,9 @@ class PrunedConv(nn.Module):
 
     def prune_by_percentage(self, q=5.0):
         """
-        Pruning by a factor of the standard deviation value.
-        :param s: (scalar) factor of the standard deviation value. 
-        Weight magnitude below np.std(weight)*std
-        will be pruned.
+        Pruning the weight paramters by threshold.
+        :param q: pruning percentile. 'q' percent of the least 
+        significant weight parameters will be pruned.
         """
         
         """
@@ -94,6 +111,17 @@ class PrunedConv(nn.Module):
         with pruned connections.
         --------------Your Code---------------------
         """
+        # get bounds
+        max = torch.max(torch.abs(self.conv.weight.data))
+        min = torch.min(torch.abs(self.conv.weight.data))
+        # calculate cutoff
+        cutoff = ((max - min) * (q / 100.0)) + min
+        # generate mask
+        self.mask = torch.abs(self.conv.weight.data) > cutoff
+        # prune the weights
+        self.conv.weight.data = self.conv.weight.float() * self.mask.float()
+        # calculate sparsity
+        self.sparsity = self.conv.weight.data.numel() - self.conv.weight.data.nonzero().size(0)
         
 
     def prune_by_std(self, s=0.25):
@@ -111,5 +139,11 @@ class PrunedConv(nn.Module):
         with pruned connections.
         --------------Your Code---------------------
         """
-        pass
+        # generate mask
+        self.mask = torch.abs(self.conv.weight.data) >= (torch.std(self.conv.weight.data)*s)
+        # prune the weights
+        self.conv.weight.data = self.conv.weight.data.float() * self.mask.float()
+        # calculate sparsity
+        self.sparsity = self.conv.weight.data.numel() - self.conv.weight.data.nonzero().size(0)
+        
 
