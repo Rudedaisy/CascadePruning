@@ -160,6 +160,11 @@ def finetune_after_prune(net, epochs=100, batch_size=128, lr=0.01, reg=5e-4):
             Zero the gradients of the pruned variables.
             -----------------------Your Code-------------------------
             """
+            for n, m in net.named_modules():
+                if isinstance(m, PrunedConv):
+                    m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
+                if isinstance(m, PruneLinear):
+                    m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
 
             optimizer.step()
             train_loss += loss.item()
@@ -171,8 +176,8 @@ def finetune_after_prune(net, epochs=100, batch_size=128, lr=0.01, reg=5e-4):
             if global_steps % 16 == 0:
                 end = time.time()
                 num_examples_per_second = 16 * batch_size / (end - start)
-                print("[Step=%d]\tLoss=%.4f\tacc=%.4f\t%.1f examples/second"
-                      % (global_steps, train_loss / (batch_idx + 1), (correct / total), num_examples_per_second))
+                #print("[Step=%d]\tLoss=%.4f\tacc=%.4f\t%.1f examples/second"
+                      #% (global_steps, train_loss / (batch_idx + 1), (correct / total), num_examples_per_second))
                 start = time.time()
         """
         Start the testing code.
@@ -231,6 +236,7 @@ def test(net):
     num_val_steps = len(testloader)
     val_acc = correct / total
     print("Test Loss=%.4f, Test accuracy=%.4f" % (test_loss / (num_val_steps), val_acc))
+    return val_acc
 
 
 
