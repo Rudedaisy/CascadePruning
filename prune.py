@@ -22,8 +22,7 @@ def prune(net, method='std', q=5.0):
             elif method == 'chunk':
                 m.prune_chunk(q=q)
             elif method == 'cascade':
-                #m.prune_filter_chunk(q=q)
                 m.prune_cascade_l1(q=q)
-                #m.prune_filter_chunk(q=q) ##### TRYING OUT CHUNKWISE PRUNE TOO
+                #m.prune_filter_chunk(q=q) ##### not a good idea to do 2-stage prune naively
             elif method == 'SSL':
                 m.prune_SSL(q)

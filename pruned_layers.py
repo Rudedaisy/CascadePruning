@@ -30,13 +30,6 @@ class PruneLinear(nn.Module):
         :param q: pruning percentile. 'q' percent of the least 
         significant weight parameters will be pruned.
         """
-        """
-        Prune the weight connections by percentage. Calculate the sparisty after 
-        pruning and store it into 'self.sparsity'.
-        Store the pruning pattern in 'self.mask' for further fine-tuning process 
-        with pruned connections.
-        --------------Your Code---------------------
-        """
         # get bounds
         max = torch.max(torch.abs(self.linear.weight.data))
         min = torch.min(torch.abs(self.linear.weight.data))
@@ -58,13 +51,6 @@ class PruneLinear(nn.Module):
         will be pruned.
         """
 
-        """
-        Prune the weight connections by standarad deviation. 
-        Calculate the sparisty after pruning and store it into 'self.sparsity'.
-        Store the pruning pattern in 'self.mask' for further fine-tuning process 
-        with pruned connections.
-        --------------Your Code---------------------
-        """
         # generate mask
         self.mask = torch.abs(self.linear.weight.data) >= (torch.std(self.linear.weight.data)*s)
         # prune the weights
@@ -275,13 +261,6 @@ class PrunedConv(nn.Module):
         significant weight parameters will be pruned.
         """
         
-        """
-        Prune the weight connections by percentage. Calculate the sparisty after 
-        pruning and store it into 'self.sparsity'.
-        Store the pruning pattern in 'self.mask' for further fine-tuning process 
-        with pruned connections.
-        --------------Your Code---------------------
-        """
         # get bounds
         max = torch.max(torch.abs(self.conv.weight.data))
         min = torch.min(torch.abs(self.conv.weight.data))
@@ -303,13 +282,6 @@ class PrunedConv(nn.Module):
         will be pruned.
         """
         
-        """
-        Prune the weight connections by standarad deviation. 
-        Calculate the sparisty after pruning and store it into 'self.sparsity'.
-        Store the pruning pattern in 'self.mask' for further fine-tuning process 
-        with pruned connections.
-        --------------Your Code---------------------
-        """
         # generate mask
         self.mask = torch.abs(self.conv.weight.data) >= (torch.std(self.conv.weight.data)*q)
         # prune the weights
