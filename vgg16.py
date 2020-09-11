@@ -135,3 +135,73 @@ class VGG16_half(nn.Module):
         feat = feat.mean(3).mean(2)
         out = self.classifer(feat)
         return out
+
+
+class VGG16_5(nn.Module):
+    def __init__(self):
+        super(VGG16_5, self).__init__()
+        self.features = nn.Sequential(
+            PrunedConv(3, 64, 5, 1, 2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            PrunedConv(64, 64, 5, 1, 2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            
+            PrunedConv(64, 128, 5, 1, 2),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            PrunedConv(128, 128, 5, 1, 2),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            
+            PrunedConv(128, 256, 5, 1, 2),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            PrunedConv(256, 256, 5, 1, 2),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            PrunedConv(256, 256, 5, 1, 2),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            
+            PrunedConv(256, 512, 5, 1, 2),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            PrunedConv(512, 512, 5, 1, 2),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            PrunedConv(512, 512, 5, 1, 2),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            
+            PrunedConv(512, 512, 5, 1, 2),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            PrunedConv(512, 512, 5, 1, 2),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            PrunedConv(512, 512, 5, 1, 2),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            )
+        self.classifer = nn.Sequential(
+            PruneLinear(512, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(inplace=True),
+            PruneLinear(512, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(inplace=True),
+            PruneLinear(512, 10)
+        )
+
+    def forward(self, x):
+        feat = self.features(x)
+        feat = feat.mean(3).mean(2)
+        out = self.classifer(feat)
+        return out

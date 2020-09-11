@@ -6,11 +6,14 @@ import torchvision
 import torch.nn as nn
 import torch.optim as optim
 
+import os
+
 from pruned_layers import *
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-def train(net, epochs=100, batch_size=128, lr=0.01, reg=5e-4):
+def train(net, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
+          checkpoint_path = '', spar_reg = None, spar_param = 0.0):
     """
     Training a network
     :param net:
@@ -44,6 +47,15 @@ def train(net, epochs=100, batch_size=128, lr=0.01, reg=5e-4):
     optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9, weight_decay=reg, nesterov=False)
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[int(epochs*0.5), int(epochs*0.75)], gamma=0.1)
 
+    start_epoch, best_acc = _load_checkpoint(net, optimizer, checkpoint_path, scheduler)
+    best_acc_path = ''
+
+    if checkpoint_path=='':
+        checkpoint_path = os.path.join(os.path.curdir, 'ckpt/'+ net.__class__.__name__
+                                       + time.strftime('%m%d%H%M', time.localtime()))
+    if not os.path.exists(checkpoint_path):
+        os.mkdir(checkpoint_path)
+    
     global_steps = 0
     start = time.time()
 
@@ -60,7 +72,27 @@ def train(net, epochs=100, batch_size=128, lr=0.01, reg=5e-4):
             inputs, targets = inputs.to(device), targets.to(device)
             optimizer.zero_grad()
             outputs = net(inputs)
+            # compute standard loss
             loss = criterion(outputs, targets)
+            # compute sparse_regularization loss
+            loss = loss.view(1)
+            if spar_reg is not None:
+                reg_loss = torch.zeros_like(loss).to('cuda')
+                if spar_reg == 'v1':
+                    for n, m in net.named_modules():
+                        if isinstance(m, PrunedConv) or isinstance(m, PruneLinear):
+                            reg_loss += m.compute_group_lasso_v1()
+                if spar_reg == 'v2':
+                    for n, m in net.named_modules():
+                        if isinstance(m, PrunedConv) or isinstance(m, PruneLinear):
+                            reg_loss += m.compute_group_lasso_v2()
+                if spar_reg == 'SSL':
+                    for n, m in net.named_modules():
+                        if isinstance(m, PrunedConv) or isinstance(m, PruneLinear):
+                            reg_loss += m.compute_SSL()
+                            
+                loss += reg_loss * spar_param
+            
             loss.backward()
 
             optimizer.step()
@@ -102,12 +134,17 @@ def train(net, epochs=100, batch_size=128, lr=0.01, reg=5e-4):
 
         if val_acc > best_acc:
             best_acc = val_acc
-            print("Saving...")
-            torch.save(net.state_dict(), "net_before_pruning.pt")
+            print("Saving Weight...")
+            if os.path.exists(best_acc_path):
+                os.remove(best_acc_path)
+            best_acc_path = os.path.join(checkpoint_path, "retrain_weight_%d_%.2f.pt"%(epoch, best_acc))
+            torch.save(net.state_dict(), best_acc_path)
+
+        if (epoch+1) % 10 == 0:
+            _save_checkpoint(net, optimizer, epoch, best_acc, checkpoint_path, scheduler)
 
 
-
-def finetune_after_prune(net, epochs=100, batch_size=128, lr=0.01, reg=5e-4):
+def finetune_after_prune(net, epochs=100, batch_size=128, lr=0.01, reg=5e-4, checkpoint_path = ''):
     print('==> Preparing data..')
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
@@ -135,7 +172,17 @@ def finetune_after_prune(net, epochs=100, batch_size=128, lr=0.01, reg=5e-4):
     criterion = nn.CrossEntropyLoss()
 
     optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9, weight_decay=reg, nesterov=False)
-
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[int(epochs*0.5), int(epochs*0.75)], gamma=0.1)
+    
+    start_epoch, best_acc = _load_checkpoint(net, optimizer, checkpoint_path, scheduler)
+    best_acc_path = ''
+    
+    if checkpoint_path=='':
+        checkpoint_path = os.path.join(os.path.curdir, 'ckpt/finetune_'+ net.__class__.__name__
+                                       + time.strftime('%m%d%H%M', time.localtime()))
+    if not os.path.exists(checkpoint_path):
+        os.mkdir(checkpoint_path)
+    
     global_steps = 0
     start = time.time()
 
@@ -202,8 +249,14 @@ def finetune_after_prune(net, epochs=100, batch_size=128, lr=0.01, reg=5e-4):
 
         if val_acc > best_acc:
             best_acc = val_acc
-            print("Saving...")
-            torch.save(net.state_dict(), "net_after_pruning.pt")
+            print("Saving Weight...")
+            if os.path.exists(best_acc_path):
+                os.remove(best_acc_path)
+            best_acc_path = os.path.join(checkpoint_path, "pruned_weight_%d_%.2f.pt"%(epoch, best_acc))
+            torch.save(net.state_dict(), best_acc_path)
+
+        if (epoch+1) % 10 == 0:
+            _save_checkpoint(net, optimizer, epoch, best_acc, checkpoint_path, scheduler)
 
 def test(net):
     transform_test = transforms.Compose([
@@ -238,5 +291,42 @@ def test(net):
     print("Test Loss=%.4f, Test accuracy=%.4f" % (test_loss / (num_val_steps), val_acc))
     return val_acc
 
+def _save_checkpoint(net, optimizer, cur_epoch, best_acc, save_root, scheduler=None):
+    ckpt = {'weight':net.state_dict(),
+            'optim': optimizer.state_dict(),
+            'cur_epoch':cur_epoch,
+            'best_acc':best_acc}
+    if scheduler is not None:
+        ckpt['scheduler_dict'] = scheduler.state_dict()
+    if not os.path.exists(save_root):
+        os.mkdir(save_root)
+    save_path = os.path.join(save_root, "checkpoint_%d.ckpt"%cur_epoch)
+    torch.save(ckpt, save_path)
+    print("\033[36mCheckpoint Saved @%d epochs to %s\033[0m"%(cur_epoch+1, save_path))
 
-
+def _load_checkpoint(net, optimizer, ckpt_path, scheduler=None):
+    if not os.path.exists(ckpt_path):
+        print("\033[31mCannot find checkpoint folder!\033[0m")
+        print("\033[33mTrain From scratch!\033[0m")
+        return 0, 0     #Start Epoch, Best Acc
+    ckpt_list = os.listdir(ckpt_path)
+    last_epoch = -1
+    for ckpt_name in ckpt_list:
+        if "checkpoint_" in ckpt_name:
+            ckpt_epoch = int(ckpt_name.split(".")[0].split('_')[1])
+            if ckpt_epoch>last_epoch:
+                last_epoch = ckpt_epoch
+    if last_epoch == -1:
+        print("\033[33mNo checkpoint found!")
+        print("Train From scratch!\033[0m")
+        return 0, 0
+    ckpt_file = os.path.join(ckpt_path, "checkpoint_%d.ckpt"%last_epoch)
+    ckpt = torch.load(ckpt_file)
+    print("\033[36mStarting from %d epoch.\033[0m"%(ckpt['cur_epoch']))
+    net.train()       #This is important for BN
+    net.load_state_dict(ckpt['weight'])
+    optimizer.load_state_dict(ckpt['optim'])
+    if scheduler is not None:
+        scheduler.load_state_dict(ckpt['scheduler_dict'])
+        
+    return ckpt['cur_epoch'], ckpt['best_acc']
