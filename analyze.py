@@ -19,8 +19,8 @@ args = parser.parse_args()
 assert (args.path != '')
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-net = ResNet50()
-#net = VGG16()
+#net = ResNet50()
+net = VGG16()
 net = net.to(device)
 
 net.load_state_dict(torch.load(args.path))
@@ -57,6 +57,7 @@ full_ptrs = []
 ratios = []
 #chunk_track = []
 total_ptrs = []
+first_row_IFM_accesses = 0
 for idx, layer in enumerate(layers):
     sq_ptrs.append([])
     full_ptrs.append([])
@@ -75,6 +76,9 @@ for idx, layer in enumerate(layers):
 
         chunk = layer[chunk_idx * args.chunk:(chunk_idx * args.chunk + maxL)]
         sq_ptrs[idx][chunk_idx] = len(np.where(chunk.any(axis=0))[0])
+
+        if chunk_idx == 0:
+            first_row_IFM_accesses += len(np.where(chunk.any(axis=0))[0])
 
         if chunk_idx >= len(total_ptrs):
             total_ptrs.append(0)
@@ -105,14 +109,19 @@ for idx in range(len(total_ptrs)):
         accelerator_ptrs.append(0)
     accelerator_ptrs[acc_idx] += float(total_ptrs[idx])
 m = float(max(accelerator_ptrs))
+alpha = 0
+numBins = 3
 for idx in range(len(accelerator_ptrs)):
     print(str(accelerator_ptrs[idx]) + "/" + str(m))
     accelerator_ptrs[idx] = float(accelerator_ptrs[idx]) / m
+    alpha += (accelerator_ptrs[idx] * ((accelerator_ranges[idx+1] - accelerator_ranges[idx]) / accelerator_ranges[numBins]))
 for idx in range(len(total_ptrs)-1):
     total_ptrs[idx] -= total_ptrs[idx+1]
-    
+
 print("Chunk count statistics")
+print("ALPHA for dynamic power metric: {}".format(alpha))
 print("Mean: {}".format(weightedMean))
+print("First row IFM accesses: {}".format(first_row_IFM_accesses))
 #print(chunk_track)
 #print("Mean: {}".format(sum(total_ptrs) / len(total_ptrs)))
 #print("Std: {}".format(statistics.pstdev(total_ptrs)))
