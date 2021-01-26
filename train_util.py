@@ -12,7 +12,7 @@ from tensorboardX import SummaryWriter
 
 from pruned_layers import *
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cuda' #if torch.cuda.is_available() else 'cpu'
 
 def train(dataset, model, finetune=False, epochs=100, batch_size=128, lr=0.01, reg=5e-4, spar_reg=None, spar_param=0.0, checkpoint_path=''):
     if dataset == "CIFAR10":
@@ -366,9 +366,8 @@ def _train(dataset, model, trainloader, testloader,  optimizer, epochs, batch_si
 
 
         if dataset == "ImageNet":
-            prefetcher = data_prefetcher(trainloader, dataset) ##
-            inputs, targets = prefetcher.next() ##
-            #batch_idx = 0 ##
+            prefetcher = data_prefetcher(trainloader, dataset) 
+            inputs, targets = prefetcher.next() 
         else:
             prefetcher = iter(trainloader)
             try:
@@ -461,10 +460,25 @@ def _train(dataset, model, trainloader, testloader,  optimizer, epochs, batch_si
         correct = 0
         total = 0
         with torch.no_grad():
-            for batch_idx, (inputs, targets) in enumerate(testloader):
+            if dataset == "ImageNet":
+                prefetcher_test = data_prefetcher(testloader, dataset)	
+                inputs, targets = prefetcher_test.next()	
+            else:
+                prefetcher_test = iter(testloader)
+                try:
+                    inputs, targets = next(prefetcher_test)
+                except StopIteration:
+                    inputs = None
+                    targets = None
+            batch_idx = 0
+            #for batch_idx, (inputs, targets) in enumerate(testloader):
+            while inputs is not None:
+                batch_idx += 1
                 inputs, targets = inputs.to(device), targets.to(device)
                 outputs = model(inputs)
                 loss = criterion(outputs, targets)
+
+                inputs, targets = prefetcher_test.next()
                 
                 test_loss += loss.item()
                 _, predicted = outputs.max(1)

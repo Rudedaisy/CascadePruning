@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 import numpy as np
+from quantize import *
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -21,6 +22,7 @@ class PruneLinear(nn.Module):
 
     def forward(self, x):
         out = self.linear(x)
+        #out = quant8(out) ############# WORK ON THIS
         return out
         pass
 
@@ -252,6 +254,7 @@ class PrunedConv(nn.Module):
 
     def forward(self, x):
         out = self.conv(x)
+        #out = quant8(out)
         return out
 
     def prune_by_percentage(self, q=5.0):
