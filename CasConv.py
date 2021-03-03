@@ -31,7 +31,7 @@ class casConv2d(torch.nn.Module):
 
 
     def __init__(self, conv2d_module, array_size=32, quant_func = Quant8F):
-        super(self, casConv2d).__init__()
+        super(casConv2d, self).__init__()
 
         assert isinstance(conv2d_module, torch.nn.Conv2d), "Input Module is not a valid conv operator!"
         self.in_channels = conv2d_module.in_channels
