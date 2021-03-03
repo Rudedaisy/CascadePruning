@@ -2,55 +2,55 @@ import torch
 from quantize import Quant8F
 
 class casConv2d(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding=0,
-                 dilation=1, device=None, bias=True, quant_func = Quant8F, array_size=32):
-        super(casConv2d, self).__init__()
-
-        if isinstance(stride, int):
-            stride = (stride, stride)
-        if isinstance(padding, int):
-            padding = (padding, padding)
-        if isinstance(dilation, int):
-            dilation = (dilation, dilation)
-
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
-        self.dilation = dilation
-        self.quant_func = quant_func
-        self.device = device
-        self.array_size=array_size
-        if bias:
-            self.bias = torch.nn.Parameter(torch.randn((out_channels, )), requires_grad=True)
-        else:
-            self.bias = None
-        self.weight = torch.nn.Parameter(torch.randn((out_channels, in_channels, kernel_size[0], kernel_size[1] )),
-                                         requires_grad=True)
-
-
-    # def __init__(self, conv2d_module, array_size=32, quant_func = Quant8F):
-    #     super(self, casConv2d).__init__()
+    # def __init__(self, in_channels, out_channels, kernel_size, stride, padding=0,
+    #              dilation=1, device=None, bias=True, quant_func = Quant8F, array_size=32):
+    #     super(casConv2d, self).__init__()
     #
-    #     assert isinstance(conv2d_module, torch.nn.conv2d), "Input Module is not a valid conv operator!"
-    #     self.in_channels = conv2d_module.in_channels
-    #     self.out_channels = conv2d_module.out_channels
-    #     self.kernel_size = conv2d_module.kernel_size
-    #     self.stride = conv2d_module.stride
-    #     self.padding = conv2d_module.padding
-    #     self.dilation = conv2d_module.dilation
-    #     self.quant_func = quant_func()
-    #     self.device = conv2d_module.device
-    #     self.bias = conv2d_module.bias
-    #     self.array_size = array_size
+    #     if isinstance(stride, int):
+    #         stride = (stride, stride)
+    #     if isinstance(padding, int):
+    #         padding = (padding, padding)
+    #     if isinstance(dilation, int):
+    #         dilation = (dilation, dilation)
     #
-    #     if isinstance(self.stride, int):
-    #         self.stride = (self.stride, self.stride)
-    #     if isinstance(self.padding, int):
-    #         self.padding = (self.padding, self.padding)
-    #     if isinstance(self.dilation, int):
-    #         self.dilation = (self.dilation, self.dilation)
+    #     self.in_channels = in_channels
+    #     self.out_channels = out_channels
+    #     self.kernel_size = kernel_size
+    #     self.stride = stride
+    #     self.padding = padding
+    #     self.dilation = dilation
+    #     self.quant_func = quant_func
+    #     self.device = device
+    #     self.array_size=array_size
+    #     if bias:
+    #         self.bias = torch.nn.Parameter(torch.randn((out_channels, )), requires_grad=True)
+    #     else:
+    #         self.bias = None
+    #     self.weight = torch.nn.Parameter(torch.randn((out_channels, in_channels, kernel_size[0], kernel_size[1] )),
+    #                                      requires_grad=True)
+
+
+    def __init__(self, conv2d_module, array_size=32, quant_func = Quant8F):
+        super(self, casConv2d).__init__()
+
+        assert isinstance(conv2d_module, torch.nn.Conv2d), "Input Module is not a valid conv operator!"
+        self.in_channels = conv2d_module.in_channels
+        self.out_channels = conv2d_module.out_channels
+        self.kernel_size = conv2d_module.kernel_size
+        self.stride = conv2d_module.stride
+        self.padding = conv2d_module.padding
+        self.dilation = conv2d_module.dilation
+        self.quant_func = quant_func()
+        self.device = conv2d_module.device
+        self.bias = conv2d_module.bias
+        self.array_size = array_size
+
+        if isinstance(self.stride, int):
+            self.stride = (self.stride, self.stride)
+        if isinstance(self.padding, int):
+            self.padding = (self.padding, self.padding)
+        if isinstance(self.dilation, int):
+            self.dilation = (self.dilation, self.dilation)
 
     def forward(self, x):
 
