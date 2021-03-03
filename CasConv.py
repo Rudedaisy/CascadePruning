@@ -44,6 +44,7 @@ class casConv2d(torch.nn.Module):
         #self.device = conv2d_module.device
         self.bias = conv2d_module.bias
         self.array_size = array_size
+        self.weight = conv2d_module.weight
 
         if isinstance(self.stride, int):
             self.stride = (self.stride, self.stride)
@@ -73,6 +74,9 @@ class casConv2d(torch.nn.Module):
 
         #Match the dimension with broadcasting
         pre_quant_result = candi_blocks * candi_weights
+        del candi_blocks
+        del candi_weights
+
 
         #Pre_quant_result now have the shape of [batch_size, out_channels, in_channels * k * k, w_out * h_out ]
         #Now we need to pad the result to be the multiple of array size
@@ -83,9 +87,12 @@ class casConv2d(torch.nn.Module):
         #Now we split it to chunks and calculate the sum
         pre_quant_split_result = pre_quant_result.reshape(pre_quant_result.shape[0], pre_quant_result.shape[1],
                                                 pre_quant_result.shape[2]//self.array_size, self.array_size, pre_quant_result.shape[-1])
+
+        del pre_quant_split_result
         pre_quant_accu = torch.sum(pre_quant_split_result, dim=3)
          #Now we quantize the tensor along partial sum dimension
         quant_accu = self.quant_func.apply(pre_quant_accu, 2)
+        del pre_quant_accu
 
         #Let's accumulate these and get the result
         output = torch.sum(quant_accu, dim=2).reshape(quant_accu.shape[0], quant_accu.shape[1], o_shape[0], o_shape[1])
