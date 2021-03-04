@@ -265,7 +265,7 @@ def test(net):
     ])
 
     testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_test)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=10, shuffle=False, num_workers=2)
 
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
@@ -278,6 +278,7 @@ def test(net):
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(testloader):
             inputs, targets = inputs.to(device), targets.to(device)
+            print("PASS")
             outputs = net(inputs)
             loss = criterion(outputs, targets)
 
@@ -285,7 +286,11 @@ def test(net):
             _, predicted = outputs.max(1)
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
-    num_val_steps = len(testloader)
+
+            if batch_idx >= 19: ##
+                break ##
+    #num_val_steps = len(testloader)
+    num_val_steps = 20 ##
     val_acc = correct / total
     print("Test Loss=%.4f, Test accuracy=%.4f" % (test_loss / (num_val_steps), val_acc))
     return val_acc

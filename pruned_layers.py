@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 import numpy as np
+from quantize import *
+from myconv import MyConv2d
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -21,6 +23,7 @@ class PruneLinear(nn.Module):
 
     def forward(self, x):
         out = self.linear(x)
+        out = quant8(out)
         return out
         pass
 
@@ -239,8 +242,9 @@ class PrunedConv(nn.Module):
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.stride = stride
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias, dilation=1)
-
+        #self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias, dilation=1)
+        self.conv = MyConv2d(in_channels, out_channels, kernel_size, dilation=1, padding=padding, stride=stride) ############
+        
         # Expand and Transpose to match the dimension
         self.mask = np.ones_like([out_channels, in_channels, kernel_size, kernel_size])
 
@@ -252,6 +256,7 @@ class PrunedConv(nn.Module):
 
     def forward(self, x):
         out = self.conv(x)
+        out = quant8(out)
         return out
 
     def prune_by_percentage(self, q=5.0):

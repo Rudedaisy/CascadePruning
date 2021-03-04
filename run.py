@@ -73,6 +73,7 @@ if not args.skip_pt:
 else:
     net.load_state_dict(torch.load(args.path))
     print("Net loaded from {}".format(args.path))
+    test(net)
 
 print("-----Summary before pruning-----")
 summary(net)
