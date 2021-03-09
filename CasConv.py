@@ -30,10 +30,11 @@ class casConv2d(torch.nn.Module):
     #                                      requires_grad=True)
 
 
-    def __init__(self, conv2d_module, array_size=32, quant_func = Quant8F):
+    def __init__(self, conv2d_module, array_size=32, quant=8, quant_func = Quant8F):
         super(casConv2d, self).__init__()
 
         #assert isinstance(conv2d_module, torch.nn.Conv2d), "Input Module is not a valid conv operator!"
+        self.conv2d_module = conv2d_module
         self.in_channels = conv2d_module.in_channels
         self.out_channels = conv2d_module.out_channels
         self.kernel_size = conv2d_module.kernel_size
@@ -41,6 +42,7 @@ class casConv2d(torch.nn.Module):
         self.padding = conv2d_module.padding
         self.dilation = conv2d_module.dilation
         self.quant_func = quant_func()
+        self.quant = quant
         #self.device = conv2d_module.device
         self.bias = conv2d_module.bias
         self.array_size = array_size
@@ -54,7 +56,9 @@ class casConv2d(torch.nn.Module):
             self.dilation = (self.dilation, self.dilation)
 
     def forward(self, x):
-
+        #Standard conv2d to see mse result
+        #output_baseline = self.conv2d_module.forward(x)
+        
         #Calculate Output shape
         o_shape = [(x.shape[2] + 2*self.padding[0]-self.dilation[0] * (self.kernel_size[0]-1) - 1)//self.stride[0] + 1,
                    (x.shape[3] + 2*self.padding[1] -self.dilation[1] * (self.kernel_size[1]-1) - 1)//self.stride[1] + 1]
@@ -88,15 +92,25 @@ class casConv2d(torch.nn.Module):
         pre_quant_split_result = pre_quant_result.reshape(pre_quant_result.shape[0], pre_quant_result.shape[1],
                                                 pre_quant_result.shape[2]//self.array_size, self.array_size, pre_quant_result.shape[-1])
 
-        del pre_quant_split_result
+        del pre_quant_result
         pre_quant_accu = torch.sum(pre_quant_split_result, dim=3)
-         #Now we quantize the tensor along partial sum dimension
-        quant_accu = self.quant_func.apply(pre_quant_accu, 2)
+        del pre_quant_split_result
+        #Now we quantize the tensor along partial sum dimension
+        #for chunk in range(pre_quant_accu.shape[2]):
+        #    pre_quant_accu[:,:,chunk] = self.quant_func.apply(pre_quant_accu[:,:,chunk])
+        quant_accu = self.quant_func.apply(pre_quant_accu, 2, self.quant)
         del pre_quant_accu
-
+        #quant_accu = pre_quant_accu
+        
         #Let's accumulate these and get the result
         output = torch.sum(quant_accu, dim=2).reshape(quant_accu.shape[0], quant_accu.shape[1], o_shape[0], o_shape[1])
 
+        #output = self.quant_func.apply(output, 1)
+        
+        #loss_func = torch.nn.MSELoss()
+        #loss_result = loss_func(output_baseline, output)
+        #print("Layer loss: {}".format(loss_result))
+        
         return output
 
 

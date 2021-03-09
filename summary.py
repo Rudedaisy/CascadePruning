@@ -12,7 +12,7 @@ def summary(net):
     num_total_params = 0
     num_total_nonzero_params = 0
     for n, m in net.named_modules():
-        if isinstance(m, PruneLinear):
+        if isinstance(m, PrunedLinear):
             weight = m.linear.weight.data.cpu().numpy()
             weight = weight.flatten()
             num_parameters = weight.shape[0]

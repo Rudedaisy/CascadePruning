@@ -1,12 +1,16 @@
-from vgg16 import VGG16, VGG16_half, VGG16_5
-from resnet import ResNet18, ResNet34, ResNet50, ResNet101, ResNet152
-from train_util import train, train_cifar10, test, test_cifar10
+#from vgg16 import VGG16, VGG16_half, VGG16_5
+#from resnet import ResNet18, ResNet34, ResNet50, ResNet101, ResNet152
+#from train_util import train, train_cifar10, test, test_cifar10
 from summary import summary
 import torch
 import numpy as np
 from prune import prune
+from pruned_layers import *
 import argparse
 import sys
+
+from models import utils
+from models import vgg16, resnet
 
 parser = argparse.ArgumentParser(description='Bounded Structured Sparsity')
 
@@ -16,10 +20,10 @@ parser.add_argument('--model', type=str, default='vgg16', help='model to use, op
 parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset to train on: [CIFAR10, ImageNet]')
 
 parser.add_argument('--ckpt-dir', type=str, default='', help='checkpoint save/load directory, default=ckpt/<modelName><time>/')
-parser.add_argument('--epochs', type=int, default=60, help='pretrain number of epochs, default=60')
+parser.add_argument('--epochs', type=int, default=100, help='pretrain number of epochs, default=100')
 parser.add_argument('--batch', type=int, default=128, help='pretrain and finetune batch size, default=128')
 parser.add_argument('--lr', type=float, default=0.01, help='pretrain initial learning rate, default=0.01')
-parser.add_argument('--reg', type=float, default=1e-4, help='pretrain reg strength, default=1e-4')
+parser.add_argument('--reg', type=float, default=5e-4, help='pretrain reg strength, default=5e-4')
 parser.add_argument('--spar-reg', type=str, default='v2', help='sparsity regularizer type, options: [None, v1, v2, SSL]')
 parser.add_argument('--spar-str', type=float, default=1e-4, help='sparsity reg strength, default=1e-4')
 
@@ -54,45 +58,72 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # --------------------------------------- #
 
 if args.model == "vgg16":
-    net = VGG16()
+    model = vgg16.VGG16()
 elif args.model == "resnet50":
-    net = ResNet50()
+    model = resenet.ResNet50()
 else:
     print("Model {} not supported!".format(args.model))
     sys.exit(0)
-net = net.to(device)
+model = model.to(device)
+
+for i in range(len(model.features)):
+    if isinstance(model.features[i], torch.nn.Conv2d):
+        model.features[i] = PrunedConv(model.features[i])
+    if isinstance(model.features[i], torch.nn.Linear):
+        model.features[i] = PrunedLinear(model.features[i])
 
 # Uncomment to load pretrained weights
-#net.load_state_dict(torch.load("net_before_pruning.pt"))
+#model.load_state_dict(torch.load("model_before_pruning.pt"))
 
 # Comment if you have loaded pretrained weights
 # Tune the hyperparameters here.
-#train(net, epochs=35, batch_size=128, lr=0.01, reg=0.005)
-#train(net, epochs=60, batch_size=128, lr=0.01, reg=1e-4, spar_reg='v2', spar_param=1e-4, checkpoint_path=args.ckpt_dir)
+#train(model, epochs=35, batch_size=128, lr=0.01, reg=0.005)
+#train(model, epochs=60, batch_size=128, lr=0.01, reg=1e-4, spar_reg='v2', spar_param=1e-4, checkpoint_path=args.ckpt_dir)
 if not args.skip_pt:
-    train(args.dataset, net, finetune=False, epochs=args.epochs, batch_size=args.batch, lr=args.lr, reg=args.reg, spar_reg=args.spar_reg, spar_param=args.spar_str, checkpoint_path=args.ckpt_dir)
+    #train(args.dataset, model, finetune=False, epochs=args.epochs, batch_size=args.batch, lr=args.lr, reg=args.reg, spar_reg=args.spar_reg, spar_param=args.spar_str, checkpoint_path=args.ckpt_dir)
+    if args.dataset=="CIFAR10":
+        utils.train_cifar10(model, epochs=args.epochs, batch_size=args.batch, lr=args.lr, reg=args.reg,
+                            checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
+                            scheduler='step', finetune=False, cross=False, cross_interval=5)
+    else:
+        print("Dataset {} not suported!".format(args.dataset))
+        sys.exit(0)
 else:
-    net.load_state_dict(torch.load(args.path))
-    print("Net loaded from {}".format(args.path))
+    model.load_state_dict(torch.load(args.path))
+    print("Model loaded from {}".format(args.path))
 
 print("-----Summary before pruning-----")
-summary(net)
+summary(model)
 print("-------------------------------")
+
+#sys.exit(0) ########## REMOVE IF PRUNING AND FINETUNEING
 
 # --------------------------------------- #
 # --- Pruning and finetune -------------- #
 # --------------------------------------- #
 
 # Test accuracy before fine-tuning
-prune(net, method=args.prune_type, q=args.q)
-test(args.dataset, net)
+prune(model, method=args.prune_type, q=args.q)
+if args.dataset=="CIFAR10":
+    utils.eval_cifar10(model, batch_size=128)
+    #test(args.dataset, model)
+else:
+    print("Dataset {} not suported!".format(args.dataset))
+    sys.exit(0)
 
 print("-----Summary After pruning-----")
-summary(net)
+summary(model)
 print("-------------------------------")
 
 # Uncomment to load pretrained weights
 #net.load_state_dict(torch.load("net_after_pruning.pt"))
 # Comment if you have loaded pretrained weights
-#finetune_after_prune(net, epochs=50, batch_size=128, lr=0.01, reg=0.005)
-train(args.dataset, net, finetune=True, epochs=args.epochs_ft, batch_size=args.batch, lr=args.lr_ft, reg=args.reg_ft, checkpoint_path=(args.ckpt_dir_ft))
+#finetune_after_prune(model, epochs=50, batch_size=128, lr=0.01, reg=0.005)
+if args.dataset=="CIFAR10":
+    #train(args.dataset, model, finetune=True, epochs=args.epochs_ft, batch_size=args.batch, lr=args.lr_ft, reg=args.reg_ft, checkpoint_path=(args.ckpt_dir_ft))
+    utils.train_cifar10(model, epochs=args.epochs_ft, batch_size=args.batch, lr=args.lr_ft, reg=args.reg_ft,
+                        checkpoint_path = args.ckpt_dir_ft, spar_reg = args.spar_reg, spar_param = args.spar_str,
+                        scheduler='step', finetune=True, cross=False, cross_interval=5)
+else:
+    print("Dataset {} not suported!".format(args.dataset))
+    sys.exit(0)

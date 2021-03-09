@@ -1,54 +1,72 @@
 import torch
 import torch.nn as nn
 from torch.autograd import Function
-
+import math
 
 class Quant8F(Function):
 
     @staticmethod
-    def forward(cxt, input, dim):
-        if not isinstance(dim, int):
-            raise NotImplemented("Currently Only Support Selecting One Dimension.")
-        #output = input.new(input.size())
+    def forward(cxt, input, dim=None, quant=8):
+        #if not isinstance(dim, int):
+        #    raise NotImplemented("Currently Only Support Selecting One Dimension.")
+        
+        if dim!=None and input.shape[dim] < 2:
+            return input
 
-        scale = (torch.max(input, dim=dim, keepdim=True)[0] - torch.min(input, dim=dim, keepdim=True)[0])
-
-
-        initial_zero_point = 0 - torch.min(input, dim=dim, keepdim=True)[0] / scale
-        # zero_point = 0
-
-        initial_zero_point[initial_zero_point<0] = 0
-        initial_zero_point[initial_zero_point>255] = 255
-
-
-        # if initial_zero_point < 0:
-        #     zero_point = 0
-        # elif initial_zero_point > 255:
-        #     zero_point = 255
-        # else:
-        #     zero_point = initial_zero_point
-
+        if dim == None:
+            scale = (torch.max(input) - torch.min(input)) / 255
+            if scale == 0:
+                scale = 1
+            initial_zero_point = 0 - torch.min(input) / scale
+            if initial_zero_point < 0:
+                initial_zero_point = 0
+            elif initial_zero_point > 255*scale:
+                initial_zero_point = 255*scale
+            else:
+                if math.isnan(initial_zero_point):
+                    initial_zero_point = 0
+            initial_zero_point = int(initial_zero_point)
+            dtype = torch.qint8
+            qm = nn.quantized.Quantize(scale, initial_zero_point, dtype)
+            dqm = nn.quantized.DeQuantize()
+            output = dqm(qm(input))
+            
+        else:
+            scale = (1.0/(2**quant-1)) * (torch.max(input, dim=dim, keepdim=True)[0] - torch.min(input, dim=dim, keepdim=True)[0])
+            if torch.count_nonzero(scale) == 0:
+                return input
+            scale[scale==0] = 1
+            #initial_zero_point = 0 + -1*torch.min(input, dim=dim, keepdim=True)[0]
+            #initial_zero_point[initial_zero_point<0] = 0
+            #initial_zero_point[initial_zero_point>(2**quant-1)] = (2**quant-1)
+            #initial_zero_point = 0 + -1*torch.div(initial_zero_point, scale)
+            initial_zero_point = 0 + -1*torch.div(torch.min(input, dim=dim, keepdim=True)[0], scale)
+            initial_zero_point[initial_zero_point<0] = 0
+            initial_zero_point[initial_zero_point>(2**quant-1)] = (2**quant-1)
+            initial_zero_point[initial_zero_point != initial_zero_point] = 0
+            initial_zero_point = initial_zero_point.int()
+            output = ((input/scale + initial_zero_point).round_().clamp_(min=0, max=(2**quant-1)) - initial_zero_point) * scale
+            
         #print("SCALE = {}".format(scale))
         #print("ZERO_POINT = {}".format(zero_point))
-
-        #Replace with fake quantizatiaon
-
-        #Reference: https://github.com/pytorch/pytorch/blob/master/torch/quantization/fake_quantize.py#L65
-        output = ((input/scale + initial_zero_point).round_().clamp_(min=0, max=255) - initial_zero_point) * scale
         
-        # dtype = torch.qint8
-        # qm = nn.quantized.Quantize(scale, zero_point, dtype)
-        # dqm = nn.quantized.DeQuantize()
-        #
-        # output = dqm(qm(input))
+        #dtype = torch.qint8
+        #qm = nn.quantized.Quantize(scale, zero_point, dtype)
+        #dqm = nn.quantized.DeQuantize()
+
+        #output = dqm(qm(input))        
+        #output = ((input/scale + initial_zero_point).round_().clamp_(min=0, max=(2**quant-1)) - initial_zero_point) * scale
         
-        #return output
+        #mse_loss = nn.MSELoss()
+        #loss = mse_loss(input, output)
+        #print("Quantization loss: {}".format(loss))
+        
         return output
         
     @staticmethod
     def backward(cxt, grad_output):
         grad_input = grad_output.clone()
-        return grad_input
+        return grad_input, None
 
 
 # alias
