@@ -88,13 +88,17 @@ class casConv2d(torch.nn.Module):
         pad_d3 = self.array_size - pre_quant_result.shape[2] % self.array_size
         pre_quant_result = torch.nn.functional.pad(pre_quant_result, (0, 0, pad_d3, 0), mode='constant', value=0)
 
-        #Now we split it to chunks and calculate the sum
-        pre_quant_split_result = pre_quant_result.reshape(pre_quant_result.shape[0], pre_quant_result.shape[1],
-                                                pre_quant_result.shape[2]//self.array_size, self.array_size, pre_quant_result.shape[-1])
 
-        del pre_quant_result
-        pre_quant_accu = torch.sum(pre_quant_split_result, dim=3)
-        del pre_quant_split_result
+        if self.array_size > 1:
+            #Now we split it to chunks and calculate the sum
+            pre_quant_split_result = pre_quant_result.reshape(pre_quant_result.shape[0], pre_quant_result.shape[1],
+                                                              pre_quant_result.shape[2]//self.array_size, self.array_size, pre_quant_result.shape[-1])
+            del pre_quant_result
+            pre_quant_accu = torch.sum(pre_quant_split_result, dim=3)
+            del pre_quant_split_result
+        else:
+            pre_quant_accu = pre_quant_result
+            del pre_quant_result
         #Now we quantize the tensor along partial sum dimension
         #for chunk in range(pre_quant_accu.shape[2]):
         #    pre_quant_accu[:,:,chunk] = self.quant_func.apply(pre_quant_accu[:,:,chunk])

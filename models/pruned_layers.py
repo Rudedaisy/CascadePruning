@@ -20,13 +20,13 @@ class PrunedLinear(nn.Module):
         n = self.out_features
         self.sparsity = 1.0
         # Initailization
-        self.linear.weight.data.normal_(0, math.sqrt(2. / (m+n)))
-
+        #self.linear.weight.data.normal_(0, math.sqrt(2. / (m+n)))
+        
     def forward(self, x):
         out = self.linear(x)
         #out = quant8(out, None) # last layer should NOT be quantized
+
         return out
-        pass
 
     def prune_by_percentage(self, q=5.0):
         """
@@ -130,14 +130,14 @@ class PrunedLinear(nn.Module):
             mask[chunk_idx * chunk_size:, :] = torch.logical_and(mask[chunk_idx * chunk_size:, :], next_mask)
 
             # PRUNE FILTER CHUNK
-            if (chunk_idx + 1) * chunk_size > self.out_features:
-                end = self.out_features
-            else:
-                end = (chunk_idx + 1) * chunk_size
-            current_chunk = linear_mat[chunk_idx * chunk_size:end, :]
-            l1_norm = torch.sum(torch.abs(current_chunk)) / ((end - (chunk_idx * chunk_size)) * self.in_features)
-            next_mask = (l1_norm > cutoff).repeat((end - (chunk_idx * chunk_size)), self.in_features)
-            mask[chunk_idx * chunk_size:end, :] = torch.logical_and(mask[chunk_idx * chunk_size:end, :], next_mask)
+            #if (chunk_idx + 1) * chunk_size > self.out_features:
+            #    end = self.out_features
+            #else:
+            #    end = (chunk_idx + 1) * chunk_size
+            #current_chunk = linear_mat[chunk_idx * chunk_size:end, :]
+            #l1_norm = torch.sum(torch.abs(current_chunk)) / ((end - (chunk_idx * chunk_size)) * self.in_features)
+            #next_mask = (l1_norm > cutoff).repeat((end - (chunk_idx * chunk_size)), self.in_features)
+            #mask[chunk_idx * chunk_size:end, :] = torch.logical_and(mask[chunk_idx * chunk_size:end, :], next_mask)
             
         self.mask = mask
         # prune the weights
@@ -222,6 +222,8 @@ class PrunedLinear(nn.Module):
             current_cascade = linear_mat[chunk_idx * chunk_size:, :]
             
             l2_norm = torch.sqrt(torch.sum(current_cascade ** 2, dim=0) / (self.out_features - (chunk_idx * chunk_size)))
+            # use triangular number to scale norm
+            l2_norm = l2_norm *	((chunk_idx*(chunk_idx+1)/2) / (n_chunks*(n_chunks+1)/2))
             chunk_loss = torch.sum(torch.abs(l2_norm))
             layer_loss += chunk_loss
             
@@ -256,12 +258,12 @@ class PrunedConv(nn.Module):
         # Initialization
         n = self.kernel_size[0] * self.kernel_size[1] * self.out_channels
         m = self.kernel_size[0] * self.kernel_size[1] * self.in_channels
-        self.conv.weight.data.normal_(0, math.sqrt(2. / (n+m) ))
+        #self.conv.weight.data.normal_(0, math.sqrt(2. / (n+m) ))
         self.sparsity = 1.0
 
     def forward(self, x):
         out = self.conv(x)
-        out = quant8(out, None)
+        #out = quant8(out, None)
         return out
 
     def prune_by_percentage(self, q=5.0):
@@ -403,14 +405,14 @@ class PrunedConv(nn.Module):
             mask[chunk_idx * chunk_size:, :, :, :] = torch.logical_and(mask[chunk_idx * chunk_size:, :, :, :], next_mask)
 
             # PRUNE FILTER CHUNKS
-            if (chunk_idx+1) * chunk_size > self.out_channels:
-                end = self.out_channels
-            else:
-                end = (chunk_idx+1) * chunk_size
-            current_chunk = conv_mat[chunk_idx * chunk_size:end, :, :, :]
-            l1_norm = torch.sum(torch.abs(current_chunk)) / ((end - (chunk_idx * chunk_size)) * self.in_channels * self.kernel_size[0] * self.kernel_size[1])
-            next_mask = (l1_norm > cutoff).repeat((end - (chunk_idx * chunk_size)), self.in_channels, self.kernel_size[0], self.kernel_size[1])
-            mask[chunk_idx * chunk_size:end, :, :, :] = torch.logical_and(mask[chunk_idx * chunk_size:end, :, :, :], next_mask)
+            #if (chunk_idx+1) * chunk_size > self.out_channels:
+            #    end = self.out_channels
+            #else:
+            #    end = (chunk_idx+1) * chunk_size
+            #current_chunk = conv_mat[chunk_idx * chunk_size:end, :, :, :]
+            #l1_norm = torch.sum(torch.abs(current_chunk)) / ((end - (chunk_idx * chunk_size)) * self.in_channels * self.kernel_size[0] * self.kernel_size[1])
+            #next_mask = (l1_norm > cutoff).repeat((end - (chunk_idx * chunk_size)), self.in_channels, self.kernel_size[0], self.kernel_size[1])
+            #mask[chunk_idx * chunk_size:end, :, :, :] = torch.logical_and(mask[chunk_idx * chunk_size:end, :, :, :], next_mask)
             
         self.mask = mask
         # prune the weights
@@ -492,6 +494,8 @@ class PrunedConv(nn.Module):
             current_cascade = conv_mat[chunk_idx * chunk_size:, :]
 
             l2_norm = torch.sqrt(torch.sum(current_cascade ** 2, dim=0) / (self.out_channels - (chunk_idx * chunk_size)))
+            # use triangular number to scale norm
+            l2_norm = l2_norm * ((chunk_idx*(chunk_idx+1)/2) / (n_chunks*(n_chunks+1)/2))
             chunk_loss = torch.sum(torch.abs(l2_norm))
             layer_loss += chunk_loss
 

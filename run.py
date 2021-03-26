@@ -10,13 +10,14 @@ import argparse
 import sys
 
 from models import utils
-from models import vgg16, resnet
+from models import vgg16, vgg_in, resnet, resnet_in, inception_v3
+from models import helpers
 
 parser = argparse.ArgumentParser(description='Bounded Structured Sparsity')
 
 parser.add_argument('--skip-pt', action='store_true', default=False, help='skip pretrain and simply load weights directly')
 parser.add_argument('--path', type=str, default='', help='file to load pretrained weights from')
-parser.add_argument('--model', type=str, default='vgg16', help='model to use, options: [vgg16, resnet50]')
+parser.add_argument('--model', type=str, default='vgg16', help='model to use, options: [vgg16, resnet50, inception_v3]')
 parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset to train on: [CIFAR10, ImageNet]')
 
 parser.add_argument('--ckpt-dir', type=str, default='', help='checkpoint save/load directory, default=ckpt/<modelName><time>/')
@@ -58,19 +59,58 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # --------------------------------------- #
 
 if args.model == "vgg16":
-    model = vgg16.VGG16()
+    if args.dataset == "ImageNet":
+        model = vgg_in.vgg16_bn(pretrained=True)
+    else:
+        model = vgg16.VGG16()
 elif args.model == "resnet50":
-    model = resenet.ResNet50()
+    if args.dataset == "ImageNet":
+        model = resnet_in.resnet50(pretrained=True)
+    else:
+        model = resenet.ResNet50()
+elif args.model == "inception_v3":
+    if args.dataset == "ImageNet":
+        model = inception_v3.gluon_inception_v3(pretrained=True)
+    else:
+        print("Model {} no supported on this dataset!".format(args.model))
 else:
     print("Model {} not supported!".format(args.model))
     sys.exit(0)
 model = model.to(device)
 
-for i in range(len(model.features)):
-    if isinstance(model.features[i], torch.nn.Conv2d):
-        model.features[i] = PrunedConv(model.features[i])
-    if isinstance(model.features[i], torch.nn.Linear):
-        model.features[i] = PrunedLinear(model.features[i])
+#for layer in model.named_modules():
+#    print(layer)
+    
+def replace_with_pruned(m, name):    
+    #print(m)
+    if type(m) == PrunedConv or type(m) == PrunedLinear:
+        return
+    for attr_str in dir(m):
+        target_attr = getattr(m, attr_str)
+        if type(target_attr) == torch.nn.Conv2d:
+            print("Replaced CONV")
+            setattr(m, attr_str, PrunedConv(target_attr))
+        elif type(target_attr) == torch.nn.Linear:
+            print("Replaced Linear")
+            setattr(m, attr_str, PrunedLinear(target_attr))
+
+    for n, ch in m.named_children():
+        replace_with_pruned(ch, n)
+
+if args.model != "vgg16":
+    replace_with_pruned(model, "model")
+else:
+    for i in range(len(model.features)):
+        print(model.features[i])
+        if isinstance(model.features[i], torch.nn.Conv2d):
+            print("Replaced CONV")
+            model.features[i] = PrunedConv(model.features[i])
+        if isinstance(model.features[i], torch.nn.Linear):
+            print("Replaced Linear")
+            model.features[i] = PrunedLinear(model.features[i])
+
+for layer in model.named_modules():
+    print(layer)
 
 # Uncomment to load pretrained weights
 #model.load_state_dict(torch.load("model_before_pruning.pt"))
@@ -85,11 +125,22 @@ if not args.skip_pt:
         utils.train_cifar10(model, epochs=args.epochs, batch_size=args.batch, lr=args.lr, reg=args.reg,
                             checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
                             scheduler='step', finetune=False, cross=False, cross_interval=5)
+    elif args.dataset == "ImageNet":
+        utils.train_imagenet(model, epochs=args.epochs, batch_size=args.batch, lr=args.lr, reg=args.reg,
+                             checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
+                             scheduler='step', finetune=False, amp=True, lmdb=True)
     else:
         print("Dataset {} not suported!".format(args.dataset))
         sys.exit(0)
 else:
+    #if args.dataset == "ImageNet":
+    #    if not torch.distributed.is_initialized():
+    #        port = np.random.randint(10000, 65536)
+    #        torch.distributed.init_process_group(backend='nccl', init_method='tcp://127.0.0.1:%d'%port, rank=0, world_size=1)
+    #    model = torch.nn.parallel.DistributedDataParallel(model)
+
     model.load_state_dict(torch.load(args.path))
+    #helpers.load_state_dict(args.path)
     print("Model loaded from {}".format(args.path))
 
 print("-----Summary before pruning-----")
@@ -107,6 +158,9 @@ prune(model, method=args.prune_type, q=args.q)
 if args.dataset=="CIFAR10":
     utils.eval_cifar10(model, batch_size=128)
     #test(args.dataset, model)
+elif args.dataset == "ImageNet":
+    #utils.val_imagenet(model, lmdb=True, amp=True)
+    print("Val_imagenet not working!")
 else:
     print("Dataset {} not suported!".format(args.dataset))
     sys.exit(0)
@@ -124,6 +178,12 @@ if args.dataset=="CIFAR10":
     utils.train_cifar10(model, epochs=args.epochs_ft, batch_size=args.batch, lr=args.lr_ft, reg=args.reg_ft,
                         checkpoint_path = args.ckpt_dir_ft, spar_reg = args.spar_reg, spar_param = args.spar_str,
                         scheduler='step', finetune=True, cross=False, cross_interval=5)
+elif args.dataset == "ImageNet":
+    utils.train_imagenet(model, epochs=args.epochs_ft, batch_size=args.batch, lr=args.lr, reg=args.reg,
+                         checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
+                         scheduler='step', finetune=True, amp=True, lmdb=True)
 else:
     print("Dataset {} not suported!".format(args.dataset))
     sys.exit(0)
+
+summary(model)

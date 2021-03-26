@@ -36,9 +36,9 @@ import time
 import os
 import copy
 
-def spar_reg_func(model, loss, spar_reg=None):
+def spar_reg_func(model, loss, spar_reg=None, finetune=False):
     reg_loss = 0
-    if spar_reg is not None:
+    if (spar_reg is not None) and (finetune == False):
         reg_loss = torch.zeros_like(loss).to('cuda')
         #Sparsity Regularization                                                                                                                                                      
         if spar_reg == 'l1':
@@ -54,6 +54,17 @@ def spar_reg_func(model, loss, spar_reg=None):
                 if isinstance(m, DecomposedConv2D):
                     reg_loss += torch.sum(torch.abs(m.coefs))
                     reg_loss += m.compute_group_lasso()
+        elif spar_reg == 'v1':
+            for n, m in model.named_modules():
+                if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
+                    reg_loss += m.compute_group_lasso_v1()
+        elif spar_reg == 'v2':
+            for n, m in model.named_modules():
+                if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
+                    reg_loss += m.compute_group_lasso_v2()
+        else:
+            print("Sparsity regularizer {} not supported!".format(spar_reg))
+            exit(0)
     return reg_loss
                     
 def train_mnist(model, epochs, batch_size=256, lr=0.01, reg=5e-4, checkpoint_path ='',
@@ -112,7 +123,7 @@ def train_mnist(model, epochs, batch_size=256, lr=0.01, reg=5e-4, checkpoint_pat
             loss = criterion(outputs, targets)
 
             loss = loss.view(1)
-            reg_loss = spar_reg_func(model, loss, spar_reg)
+            reg_loss = spar_reg_func(model, loss, spar_reg, finetune)
             loss += reg_loss * spar_param
             
             loss.backward()
@@ -129,9 +140,11 @@ def train_mnist(model, epochs, batch_size=256, lr=0.01, reg=5e-4, checkpoint_pat
                 """
                 for n, m in model.named_modules():
                     if isinstance(m, PrunedConv):
-                        m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
+                        m.conv.weight.grad[m==0] = 0
+                        #m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
                     if isinstance(m, PrunedLinear):
-                        m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
+                        m.linear.weight.grad[m==0] = 0
+                        #m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
             
             optimizer.step()
             train_loss += loss.item()
@@ -292,7 +305,7 @@ def train_cifar100(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
             loss = criterion(outputs, targets)
 
             loss = loss.view(1)
-            reg_loss = spar_reg_func(model, loss, spar_reg)
+            reg_loss = spar_reg_func(model, loss, spar_reg, finetune)
             loss += reg_loss * spar_param
 
             loss.backward()
@@ -309,9 +322,11 @@ def train_cifar100(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
                 """
                 for n, m in model.named_modules():
                     if isinstance(m, PrunedConv):
-                        m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
+                        m.conv.weight.grad[m==0] = 0
+                        #m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
                     if isinstance(m, PrunedLinear):
-                        m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
+                        m.linear.weight.grad[m==0] = 0
+                        #m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
             
             optimizer.step()
             train_loss += loss.item()
@@ -473,7 +488,7 @@ def train_cifar10(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
             loss = criterion(outputs, targets)
 
             loss = loss.view(1)
-            reg_loss = spar_reg_func(model, loss, spar_reg)
+            reg_loss = spar_reg_func(model, loss, spar_reg, finetune)
             loss += reg_loss * spar_param
 
             loss.backward()
@@ -490,9 +505,11 @@ def train_cifar10(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
                 """
                 for n, m in model.named_modules():
                     if isinstance(m, PrunedConv):
-                        m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
+                        m.conv.weight.grad[m==0] = 0
+                        #m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
                     if isinstance(m, PrunedLinear):
-                        m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
+                        m.linear.weight.grad[m==0] = 0
+                        #m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
             
             optimizer.step()
             train_loss += loss.item()
@@ -595,8 +612,9 @@ def eval_cifar10(model, batch_size=128):
 def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
                   checkpoint_path = '', spar_reg = None, spar_param = 0.0,
                   scheduler='step', finetune=False, cross=False, cross_interval=5,
-                  data_dir="../../ILSVRC/Data/CLS-LOC/", amp=False, lmdb=False
-                   ):
+                   data_dir="/root/hostPublic/ImageNet/", amp=False, lmdb=False):
+    #data_dir="../../ILSVRC/Data/CLS-LOC/", amp=False, lmdb=False
+    #):
 
     if not torch.distributed.is_initialized():
         port = np.random.randint(10000, 65536)
@@ -681,22 +699,47 @@ def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
            spar_method=spar_reg, spar_reg=spar_param,
            sampler=train_sampler, ena_amp=amp)
 
-def val_imagenet(model, valdir="../../ILSVRC/Data/CLS-LOC/val/"):
+def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=False):
+    torch.backends.cudnn.benchmark = True
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     print("Loading Validation Data...")
+    
+    if lmdb:
+        valdir = os.path.join(valdir, 'val.lmdb')
+        val_dataset = ImageFolderLMDB(valdir,
+                                      transforms.Compose([
+                                          transforms.Resize(256),
+                                          transforms.CenterCrop(224),
+                                          transforms.ToTensor(),
+                                      ]))
+    else:
+        valdir = os.path.join(valdir, 'val')
+        val_dataset = datasets.ImageFolder(valdir,
+                                           transforms.Compose([
+                                               transforms.Resize(256),
+                                               transforms.CenterCrop(224),
+                                               transforms.ToTensor(),
+                                           ]))
+        
+    #val_loader = torch.utils.data.DataLoader(
+    #    val_dataset,batch_size=256, shuffle=False, num_workers= 16, pin_memory=True)
 
-    val_dataset = datasets.ImageFolder(valdir,
-        transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            #normalize
-        ]))
+    if amp:
+        model.ena_amp = True
 
+    if not torch.distributed.is_initialized():
+        port = np.random.randint(10000, 65536)
+        torch.distributed.init_process_group(backend='nccl', init_method='tcp://127.0.0.1:%d'%port, rank=0, world_size=1)
+        
+    # DistributedDataParallel will divide and allocate batch_size to all
+    # available GPUs if device_ids are not set
+    model = torch.nn.parallel.DistributedDataParallel(model)
+    val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
     val_loader = torch.utils.data.DataLoader(
-        val_dataset,batch_size=256, shuffle=False, num_workers= 16, pin_memory=True)
-
+        val_dataset,batch_size=256, shuffle=False, sampler=val_sampler,
+	num_workers=16, pin_memory=True)
+    
     return _eval(model, val_loader)
 
 #Fix for 1x1 Conv layer's SGL
@@ -760,18 +803,18 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
             sampler.set_epoch(epoch)
         #Swap training basis or coefficient
 
-        if cross and (epoch+1)%cross_interval==0:      #Interleave training bases and coefficient
-            train_coef = not train_coef
-            print('Swaping Bases and Coefficient Training...')
-            for _, m in model.named_modules():
-                if isinstance(m, DecomposedConv2D):
-                    m.coefs.requires_grad = train_coef
-                    m.basis.requires_grad = not train_coef
-        elif not cross:
-            for _, m in model.named_modules():
-                if isinstance(m, DecomposedConv2D):
-                    m.coefs.requires_grad = True
-                    m.basis.requires_grad = True
+        #if cross and (epoch+1)%cross_interval==0:      #Interleave training bases and coefficient
+        #    train_coef = not train_coef
+        #    print('Swaping Bases and Coefficient Training...')
+        #    for _, m in model.named_modules():
+        #        if isinstance(m, DecomposedConv2D):
+        #            m.coefs.requires_grad = train_coef
+        #            m.basis.requires_grad = not train_coef
+        #elif not cross:
+        #    for _, m in model.named_modules():
+        #        if isinstance(m, DecomposedConv2D):
+        #            m.coefs.requires_grad = True
+        #            m.basis.requires_grad = True
 
         prefetcher = data_prefetcher(trainloader)
         inputs, targets = prefetcher.next()
@@ -810,6 +853,14 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                             if isinstance(m, DecomposedConv2D):
                                 # print(m.compute_4col_loss().detach().cpu())
                                 reg_loss += m.compute_4col_loss()
+                    elif spar_reg == 'v1' and not finetune:
+                        for n, m in model.named_modules():
+                            if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
+                                reg_loss += m.compute_group_lasso_v1()
+                    elif spar_reg == 'v2' and not finetune:
+                        for n, m in model.named_modules():
+                            if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
+                                reg_loss += m.compute_group_lasso_v2()
 
                     loss += reg_loss * spar_reg
                 scaler.scale(loss).backward()
@@ -840,6 +891,14 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                         if isinstance(m, nn.Conv2d) and m.weight.shape[2] == 1:
                             reg_loss += torch.sum(torch.abs(m.weight))
                             reg_loss += compute_sgl(m)
+                elif spar_reg == 'v1' and not finetune:
+                    for n, m in model.named_modules():
+                        if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
+                            reg_loss += m.compute_group_lasso_v1()
+                elif spar_reg == 'v2' and not finetune:
+                    for n, m in model.named_modules():
+                        if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
+                            reg_loss += m.compute_group_lasso_v2()
                 loss += reg_loss * spar_reg
                 loss.backward()
                 losses.update(loss.item(), inputs.size(0))
@@ -864,9 +923,11 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                 """
                 for n, m in model.named_modules():
                     if isinstance(m, PrunedConv):
-                        m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
+                        m.conv.weight.grad[m==0] = 0
+                        #m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
                     if isinstance(m, PrunedLinear):
-                        m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
+                        m.linear.weight.grad[m==0] = 0
+                        #m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
             
             if ena_amp:
                 scaler.step(optimizer)

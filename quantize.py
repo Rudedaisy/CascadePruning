@@ -16,7 +16,8 @@ class Quant8F(Function):
         if dim == None:
             scale = (torch.max(input) - torch.min(input)) / 255
             if scale == 0:
-                scale = 1
+                #scale = 1
+                return input
             initial_zero_point = 0 - torch.min(input) / scale
             if initial_zero_point < 0:
                 initial_zero_point = 0
@@ -26,11 +27,11 @@ class Quant8F(Function):
                 if math.isnan(initial_zero_point):
                     initial_zero_point = 0
             initial_zero_point = int(initial_zero_point)
-            dtype = torch.qint8
-            qm = nn.quantized.Quantize(scale, initial_zero_point, dtype)
-            dqm = nn.quantized.DeQuantize()
-            output = dqm(qm(input))
-            
+            #dtype = torch.qint8
+            #qm = nn.quantized.Quantize(scale, initial_zero_point, dtype)
+            #dqm = nn.quantized.DeQuantize()
+            #output = dqm(qm(input))
+            output = ((input/scale + initial_zero_point).round_().clamp_(min=0, max=(2**quant-1)) - initial_zero_point) * scale
         else:
             scale = (1.0/(2**quant-1)) * (torch.max(input, dim=dim, keepdim=True)[0] - torch.min(input, dim=dim, keepdim=True)[0])
             if torch.count_nonzero(scale) == 0:
