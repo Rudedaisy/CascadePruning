@@ -36,34 +36,34 @@ import time
 import os
 import copy
 
-def spar_reg_func(model, loss, spar_reg=None, finetune=False):
+def spar_reg_func(model, loss, spar_method=None, finetune=False):
     reg_loss = 0
-    if (spar_reg is not None) and (finetune == False):
+    if (spar_method is not None) and (finetune == False):
         reg_loss = torch.zeros_like(loss).to('cuda')
         #Sparsity Regularization                                                                                                                                                      
-        if spar_reg == 'l1':
+        if spar_method == 'l1':
             for n, m in model.named_parameters():
                 if "coef" in n:
                     reg_loss += torch.sum(torch.abs(m))
-        elif spar_reg == 'p2':
+        elif spar_method == 'p2':
             for n, m in model.named_modules():
                 if isinstance(m, DecomposedConv2D):
                     reg_loss += m.compute_p2_loss(bits=4)
-        elif spar_reg == 'sgl':
+        elif spar_method == 'sgl':
             for n, m in model.named_modules():
                 if isinstance(m, DecomposedConv2D):
                     reg_loss += torch.sum(torch.abs(m.coefs))
                     reg_loss += m.compute_group_lasso()
-        elif spar_reg == 'v1':
+        elif spar_method == 'v1':
             for n, m in model.named_modules():
                 if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                     reg_loss += m.compute_group_lasso_v1()
-        elif spar_reg == 'v2':
+        elif spar_method == 'v2':
             for n, m in model.named_modules():
                 if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                     reg_loss += m.compute_group_lasso_v2()
         else:
-            print("Sparsity regularizer {} not supported!".format(spar_reg))
+            print("Sparsity regularizer {} not supported!".format(spar_method))
             exit(0)
     return reg_loss
                     
@@ -140,10 +140,10 @@ def train_mnist(model, epochs, batch_size=256, lr=0.01, reg=5e-4, checkpoint_pat
                 """
                 for n, m in model.named_modules():
                     if isinstance(m, PrunedConv):
-                        m.conv.weight.grad[m==0] = 0
+                        m.conv.weight.grad[m.conv.weight==0] = 0
                         #m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
                     if isinstance(m, PrunedLinear):
-                        m.linear.weight.grad[m==0] = 0
+                        m.linear.weight.grad[m.linear.weight==0] = 0
                         #m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
             
             optimizer.step()
@@ -322,10 +322,10 @@ def train_cifar100(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
                 """
                 for n, m in model.named_modules():
                     if isinstance(m, PrunedConv):
-                        m.conv.weight.grad[m==0] = 0
+                        m.conv.weight.grad[m.conv.weight==0] = 0
                         #m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
                     if isinstance(m, PrunedLinear):
-                        m.linear.weight.grad[m==0] = 0
+                        m.linear.weight.grad[m.linear.weight==0] = 0
                         #m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
             
             optimizer.step()
@@ -505,10 +505,10 @@ def train_cifar10(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
                 """
                 for n, m in model.named_modules():
                     if isinstance(m, PrunedConv):
-                        m.conv.weight.grad[m==0] = 0
+                        m.conv.weight.grad[m.conv.weight==0] = 0
                         #m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
                     if isinstance(m, PrunedLinear):
-                        m.linear.weight.grad[m==0] = 0
+                        m.linear.weight.grad[m.linear.weight==0] = 0
                         #m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
             
             optimizer.step()
@@ -690,7 +690,7 @@ def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
     elif scheduler == 'cosine':
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-    if checkpoint_path != '':
+    if checkpoint_path != '' and not finetune:
         _load_checkpoint(model, optimizer, checkpoint_path, scheduler)
 
     _train(model, trainloader, testloader, optimizer, epochs,
@@ -763,7 +763,11 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
            checkpoint_path='', save_interval=2, device='cuda', finetune=False,
            cross=False, cross_interval=5, spar_method=None, spar_reg = 0.0, sampler=None, ena_amp=False):
 
-    start_epoch, best_acc = _load_checkpoint(model, optimizer, checkpoint_path, scheduler)
+    if not finetune:
+        start_epoch, best_acc = _load_checkpoint(model, optimizer, checkpoint_path, scheduler)
+    else:
+        start_epoch = 0
+        best_acc = 0.0
     best_acc_path = ''
 
     if checkpoint_path=='':
@@ -853,11 +857,12 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                             if isinstance(m, DecomposedConv2D):
                                 # print(m.compute_4col_loss().detach().cpu())
                                 reg_loss += m.compute_4col_loss()
-                    elif spar_reg == 'v1' and not finetune:
+                    elif spar_method == 'v1' and not finetune:
                         for n, m in model.named_modules():
                             if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                                 reg_loss += m.compute_group_lasso_v1()
-                    elif spar_reg == 'v2' and not finetune:
+                    elif spar_method == 'v2' and not finetune:
+                        #print("HERE")
                         for n, m in model.named_modules():
                             if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                                 reg_loss += m.compute_group_lasso_v2()
@@ -891,11 +896,11 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                         if isinstance(m, nn.Conv2d) and m.weight.shape[2] == 1:
                             reg_loss += torch.sum(torch.abs(m.weight))
                             reg_loss += compute_sgl(m)
-                elif spar_reg == 'v1' and not finetune:
+                elif spar_method == 'v1' and not finetune:
                     for n, m in model.named_modules():
                         if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                             reg_loss += m.compute_group_lasso_v1()
-                elif spar_reg == 'v2' and not finetune:
+                elif spar_method == 'v2' and not finetune:
                     for n, m in model.named_modules():
                         if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                             reg_loss += m.compute_group_lasso_v2()
@@ -923,10 +928,10 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                 """
                 for n, m in model.named_modules():
                     if isinstance(m, PrunedConv):
-                        m.conv.weight.grad[m==0] = 0
+                        m.conv.weight.grad[m.conv.weight==0] = 0
                         #m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
                     if isinstance(m, PrunedLinear):
-                        m.linear.weight.grad[m==0] = 0
+                        m.linear.weight.grad[m.linear.weight==0] = 0
                         #m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
             
             if ena_amp:

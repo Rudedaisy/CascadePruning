@@ -67,7 +67,7 @@ elif args.model == "resnet50":
     if args.dataset == "ImageNet":
         model = resnet_in.resnet50(pretrained=True)
     else:
-        model = resenet.ResNet50()
+        model = resnet.ResNet50()
 elif args.model == "inception_v3":
     if args.dataset == "ImageNet":
         model = inception_v3.gluon_inception_v3(pretrained=True)
@@ -105,9 +105,10 @@ else:
         if isinstance(model.features[i], torch.nn.Conv2d):
             print("Replaced CONV")
             model.features[i] = PrunedConv(model.features[i])
-        if isinstance(model.features[i], torch.nn.Linear):
+    for i in range(len(model.classifier)):
+        if isinstance(model.classifier[i], torch.nn.Linear):
             print("Replaced Linear")
-            model.features[i] = PrunedLinear(model.features[i])
+            model.classifier[i] = PrunedLinear(model.classifier[i])
 
 for layer in model.named_modules():
     print(layer)
@@ -147,7 +148,7 @@ print("-----Summary before pruning-----")
 summary(model)
 print("-------------------------------")
 
-#sys.exit(0) ########## REMOVE IF PRUNING AND FINETUNEING
+sys.exit(0) ########## REMOVE IF PRUNING AND FINETUNEING
 
 # --------------------------------------- #
 # --- Pruning and finetune -------------- #

@@ -55,7 +55,7 @@ class VGG16(nn.Module):
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
         )
-        self.classifer = nn.Sequential(
+        self.classifier = nn.Sequential(
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
@@ -68,7 +68,7 @@ class VGG16(nn.Module):
     def forward(self, x):
         feat = self.features(x)
         feat = feat.mean(3).mean(2)
-        out = self.classifer(feat)
+        out = self.classifier(feat)
         return out
 
 class VGG16_TEST(nn.Module):
@@ -120,7 +120,7 @@ class VGG16_TEST(nn.Module):
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
         )
-        self.classifer = nn.Sequential(
+        self.classifier = nn.Sequential(
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
@@ -133,7 +133,7 @@ class VGG16_TEST(nn.Module):
     def forward(self, x):
         feat = self.features(x)
         feat = feat.mean(3).mean(2)
-        out = self.classifer(feat)
+        out = self.classifier(feat)
         return out
 
 class VGG16_half(nn.Module):
@@ -185,7 +185,7 @@ class VGG16_half(nn.Module):
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
         )
-        self.classifer = nn.Sequential(
+        self.classifier = nn.Sequential(
             nn.Linear(256, 256),
             nn.BatchNorm1d(256),
             nn.ReLU(inplace=True),
@@ -198,5 +198,5 @@ class VGG16_half(nn.Module):
     def forward(self, x):
         feat = self.features(x)
         feat = feat.mean(3).mean(2)
-        out = self.classifer(feat)
+        out = self.classifier(feat)
         return out

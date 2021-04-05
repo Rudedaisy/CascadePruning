@@ -126,6 +126,8 @@ class PrunedLinear(nn.Module):
         for chunk_idx in range(n_chunks):
             current_cascade = linear_mat[chunk_idx * chunk_size:, :]
             l1_norm = torch.sum(torch.abs(current_cascade), dim=0) / (self.out_features - (chunk_idx * chunk_size))
+            # scale norm
+            l1_norm = l1_norm * ((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
             next_mask = (l1_norm > cutoff).repeat((self.out_features - (chunk_idx * chunk_size)), 1)
             mask[chunk_idx * chunk_size:, :] = torch.logical_and(mask[chunk_idx * chunk_size:, :], next_mask)
 
@@ -223,7 +225,7 @@ class PrunedLinear(nn.Module):
             
             l2_norm = torch.sqrt(torch.sum(current_cascade ** 2, dim=0) / (self.out_features - (chunk_idx * chunk_size)))
             # use triangular number to scale norm
-            l2_norm = l2_norm *	((chunk_idx*(chunk_idx+1)/2) / (n_chunks*(n_chunks+1)/2))
+            l2_norm = l2_norm *	((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
             chunk_loss = torch.sum(torch.abs(l2_norm))
             layer_loss += chunk_loss
             
@@ -401,6 +403,8 @@ class PrunedConv(nn.Module):
         for chunk_idx in range(n_chunks):
             current_cascade = conv_mat[chunk_idx * chunk_size:, :, :, :]
             l1_norm = torch.sum(torch.abs(current_cascade), dim=0) / (self.out_channels - (chunk_idx * chunk_size))
+            # scale the norm
+            l1_norm = l1_norm * ((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
             next_mask = (l1_norm > cutoff).repeat((self.out_channels - (chunk_idx * chunk_size)), 1, 1, 1)
             mask[chunk_idx * chunk_size:, :, :, :] = torch.logical_and(mask[chunk_idx * chunk_size:, :, :, :], next_mask)
 
@@ -495,7 +499,7 @@ class PrunedConv(nn.Module):
 
             l2_norm = torch.sqrt(torch.sum(current_cascade ** 2, dim=0) / (self.out_channels - (chunk_idx * chunk_size)))
             # use triangular number to scale norm
-            l2_norm = l2_norm * ((chunk_idx*(chunk_idx+1)/2) / (n_chunks*(n_chunks+1)/2))
+            l2_norm = l2_norm * ((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
             chunk_loss = torch.sum(torch.abs(l2_norm))
             layer_loss += chunk_loss
 

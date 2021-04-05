@@ -22,10 +22,12 @@ from prune import prune
 #assert (args.path != '')
 
 EXPORT_PATH = "/root/hostCurUser/reproduce/DNNsim/net_traces/ResNet50_ImageNet_CSP/"
+MODEL_PATH = "/root/hostCurUser/reproduce/DNNsim/models/ResNet50_ImageNet_CSP/"
+SCALE_PATH = "/root/hostCurUser/root/SCALE-Sim-cascade/topologies/conv_nets/ResNet50_CIFAR10.csv"
 LAYER_IDX = 0
 
 class DataExporter(nn.Module):
-    def __init__(self, module, save_dir, layer_idx, f):
+    def __init__(self, module, save_dir, layer_idx, f, fscale):
         super(DataExporter, self).__init__()
         assert (isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear)), "DataExporter needs either Conv2d or Linear module"
 
@@ -33,6 +35,7 @@ class DataExporter(nn.Module):
         self.save_dir = save_dir
         self.name = str(layer_idx)
         self.f = f
+        self.fscale = fscale
         
     def forward(self, x):
         out = self.module(x)
@@ -40,12 +43,12 @@ class DataExporter(nn.Module):
         if isinstance(self.module, nn.Conv2d):
             name = "Conv" + self.name
             tp = "conv"
-            stride = str(self.module.stride)
-            padding = str(self.module.padding)
+            stride = str(self.module.stride[0])
+            padding = str(self.module.padding[0])
         else:
             name = "FC" + self.name
             tp = "fc"
-            stride = str(0)
+            stride = str(1)
             padding = str(0)
         
         print("Saving {}".format(name))
@@ -58,11 +61,27 @@ class DataExporter(nn.Module):
         weight_save = self.module.weight.detach().cpu().numpy()
         np.save(self.save_dir + "wgt-" + name + ".npy", weight_save)
 
-        self.f.write(name+": " + name+":" + tp+":" + stride+":" + padding + "\n")
+        self.f.write(name+"," + tp+"," + stride+"," + padding + ",\n")
+
+        # SCALE-Sim config ----
+        if isinstance(self.module, nn.Conv2d):
+            IFM_height = str(x_save.shape[2] + (2*self.module.padding[0]))
+            IFM_width = str(x_save.shape[3] + (2*self.module.padding[1]))
+            filt_height = str(weight_save.shape[2])
+            filt_width = str(weight_save.shape[3])
+        else:
+            IFM_height = str(1)
+            IFM_width = str(1)
+            filt_height = str(1)
+            filt_width = str(1)
+        channels = str(weight_save.shape[1])
+        num_filt = str(weight_save.shape[0])
+        
+        self.fscale.write(name+',\t' + IFM_height+',\t' + IFM_width+',\t' + filt_height+',\t' + filt_width+',\t' + channels+',\t' + num_filt+',\t' + stride+',\n')
         
         return out
 
-def replace_with_exporter(m, name, f):
+def replace_with_exporter(m, name, f, fscale):
     global LAYER_IDX
     if type(m) == DataExporter:
         return
@@ -70,11 +89,11 @@ def replace_with_exporter(m, name, f):
         target_attr = getattr(m, attr_str)
         if type(target_attr) == nn.Conv2d or type(target_attr) == nn.Linear:
             print("Replaced with exporter")
-            setattr(m, attr_str, DataExporter(target_attr, EXPORT_PATH, LAYER_IDX, f))
+            setattr(m, attr_str, DataExporter(target_attr, EXPORT_PATH, LAYER_IDX, f, fscale))
             LAYER_IDX += 1
             
     for n, ch in m.named_children():
-        replace_with_exporter(ch, n, f)
+        replace_with_exporter(ch, n, f, fscale)
 
 def replace_with_pruned(m, name):
     if type(m) == PrunedConv or type(m) == PrunedLinear:
@@ -93,19 +112,20 @@ def replace_with_pruned(m, name):
 
 def exportData(pathName):
     device1 = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = resnet_in.resnet50()
+    #model = resnet_in.resnet50()
+    model = resnet.ResNet50()
     model = model.to(device)
 
     replace_with_pruned(model, "model")
 
-    if not torch.distributed.is_initialized():
-        port = np.random.randint(10000, 65536)
-        torch.distributed.init_process_group(backend='nccl', init_method='tcp://127.0.0.1:%d'%port, rank=0, world_size=1)
-    model = torch.nn.parallel.DistributedDataParallel(model)
+    #if not torch.distributed.is_initialized():
+    #    port = np.random.randint(10000, 65536)
+    #    torch.distributed.init_process_group(backend='nccl', init_method='tcp://127.0.0.1:%d'%port, rank=0, world_size=1)
+    #model = torch.nn.parallel.DistributedDataParallel(model)
 
     model.load_state_dict(torch.load(pathName))
-
-    prune(model, method="cascade", q=1.0)
+    
+    #prune(model, method="cascade", q=1.0)
 
     #layer_num = 0
     #save_dir = "/root/hostCurUser/reproduce/DNNsim/net_traces/ResNet50_ImageNet_CSP/"
@@ -117,35 +137,39 @@ def exportData(pathName):
     #        layer_num += 1
 
 
-    f = open(EXPORT_PATH + "model.csv", "w")
-    replace_with_exporter(model, "model", f)
+    f = open(MODEL_PATH + "model.csv", "w")
+    fscale = open(SCALE_PATH, "w")
+    fscale.write("Layer name, IFMAP Height, IFMAP Width, Filter Height, Filter Width, Channels, Num Filter, Strides,\n")
+    replace_with_exporter(model, "model", f, fscale)
 
     #for n, m in model.named_modules():
     #    print(m)
     
-    IFM = torch.rand(1, 3, 224, 224)
+    #IFM = torch.rand(1, 3, 224, 224).cuda()
+    IFM = torch.rand(1, 3, 32, 32).cuda()
     model(IFM)
+    fscale.close()
     f.close()
 
     return
     
 def loadCoeffIdx(pathName):
-    device1 = 'cuda' if torch.cuda.is_available() else 'cpu'
-    #net = ResNet50()
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = resnet.ResNet50()
     #model = VGG16()
-    model = resnet_in.resnet50()
+    #model = resnet_in.resnet50()
     model = model.to(device)
 
     replace_with_pruned(model, "model")
 
-    if not torch.distributed.is_initialized():
-        port = np.random.randint(10000, 65536)
-        torch.distributed.init_process_group(backend='nccl', init_method='tcp://127.0.0.1:%d'%port, rank=0, world_size=1)
-    model = torch.nn.parallel.DistributedDataParallel(model)
+    #if not torch.distributed.is_initialized():
+    #    port = np.random.randint(10000, 65536)
+    #    torch.distributed.init_process_group(backend='nccl', init_method='tcp://127.0.0.1:%d'%port, rank=0, world_size=1)
+    #model = torch.nn.parallel.DistributedDataParallel(model)
     
     model.load_state_dict(torch.load(pathName))
 
-    prune(model, method="cascade", q=1.0)
+    #prune(model, method="cascade", q=1.0)
     
     layers = []
     widths = [3]
@@ -158,12 +182,12 @@ def loadCoeffIdx(pathName):
             numConv += 1
         if isinstance(m, PrunedConv):
             #print(m.mask)
-            layer = m.mask.view((m.out_channels, -1)).detach().cpu().numpy()
-            #layer = m.conv.weight.view((m.out_channels, -1)).detach().cpu().numpy()
+            #layer = m.mask.view((m.out_channels, -1)).detach().cpu().numpy()
+            layer = m.conv.weight.view((m.out_channels, -1)).detach().cpu().numpy()
         elif isinstance(m, PrunedLinear):
             #print(m.mask)
-            layer = m.mask.view((m.out_features, -1)).detach().cpu().numpy()
-            #layer = m.linear.weight.view((m.out_features, -1)).detach().cpu().numpy()
+            #layer = m.mask.view((m.out_features, -1)).detach().cpu().numpy()
+            layer = m.linear.weight.view((m.out_features, -1)).detach().cpu().numpy()
         else:
             continue
         
@@ -184,7 +208,7 @@ def squeezeCoeffIdx(layer, array_w):
     sq_ptrs = []
     #layer = layers[layerIdx]
     layer = layer > 0
-    print(layer)
+    #print(layer)
     num_fold = math.ceil(len(layer) / array_w)
     
     for chunk_idx in range(num_fold):
@@ -230,10 +254,13 @@ def main():
     
     #PATH = 'ckpt/finetune_VGG1609131701/pruned_weight_92_0.90.pt'
     #PATH = 'ckpt/finetune_VGG1609061144/pruned_weight_63_0.90.pt'
-    PATH = '/root/hostCurUser/root/CascadePruning/ckpt/DistributedDataParallel03202251/retrain_weight_88_76.85.pt'
+    #PATH = '/root/hostCurUser/root/CascadePruning/ckpt/DistributedDataParallel03202251/retrain_weight_88_76.85.pt'
 
     #PATH = "ckpt/VGG1603082154/retrain_weight_41_0.92.pt"
     #PATH = "ckpt/finetune_VGG1601261725/pruned_weight_48_0.89.pt"
+
+    PATH = '/root/hostCurUser/root/CascadePruning/ckpt/ResNet03270957/retrain_weight_73_0.94.pt'
+    #PATH = '/root/hostCurUser/root/CascadePruning/ckpt/ResNet03262148/retrain_weight_90_0.94.pt'
     
     #layers = loadCoeffIdx(PATH)
     
@@ -241,7 +268,13 @@ def main():
     #    print(len(cascadeCompress(layer, 32)))
     #    #print(squeezeCoeffIdx(layer, 32, None, None))
 
-    exportData(PATH)
+    #exportData(PATH)
+    layers = loadCoeffIdx(PATH)
+    numWeights = 0
+    for layer in layers:
+        layer = layer > 0
+        numWeights += np.sum(layer)
+    print(numWeights)
     
 if __name__ == "__main__":
     main()

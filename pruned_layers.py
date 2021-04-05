@@ -122,10 +122,13 @@ class PrunedLinear(nn.Module):
         linear_mat = self.linear.weight.data
         mask = torch.full(linear_mat.shape, True, dtype=bool).cuda()
         cutoff = torch.std(linear_mat)*q
+        cutoff = cutoff	* (1.0 / (n_chunks*(n_chunks+1)/2))
         
         for chunk_idx in range(n_chunks):
             current_cascade = linear_mat[chunk_idx * chunk_size:, :]
             l1_norm = torch.sum(torch.abs(current_cascade), dim=0) / (self.out_features - (chunk_idx * chunk_size))
+            # scale norm
+            l1_norm = l1_norm * ((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
             next_mask = (l1_norm > cutoff).repeat((self.out_features - (chunk_idx * chunk_size)), 1)
             mask[chunk_idx * chunk_size:, :] = torch.logical_and(mask[chunk_idx * chunk_size:, :], next_mask)
 
@@ -138,7 +141,7 @@ class PrunedLinear(nn.Module):
             #l1_norm = torch.sum(torch.abs(current_chunk)) / ((end - (chunk_idx * chunk_size)) * self.in_features)
             #next_mask = (l1_norm > cutoff).repeat((end - (chunk_idx * chunk_size)), self.in_features)
             #mask[chunk_idx * chunk_size:end, :] = torch.logical_and(mask[chunk_idx * chunk_size:end, :], next_mask)
-            
+
         self.mask = mask
         # prune the weights
         self.linear.weight.data = self.linear.weight.float() * self.mask.float()
@@ -223,10 +226,10 @@ class PrunedLinear(nn.Module):
             
             l2_norm = torch.sqrt(torch.sum(current_cascade ** 2, dim=0) / (self.out_features - (chunk_idx * chunk_size)))
             # use triangular number to scale norm
-            l2_norm = l2_norm *	((chunk_idx*(chunk_idx+1)/2) / (n_chunks*(n_chunks+1)/2))
+            l2_norm = l2_norm *	((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
             chunk_loss = torch.sum(torch.abs(l2_norm))
             layer_loss += chunk_loss
-            
+
         return layer_loss
 
     def compute_SSL(self):
@@ -397,10 +400,13 @@ class PrunedConv(nn.Module):
         conv_mat = self.conv.weight.data
         mask = torch.full(conv_mat.shape, True, dtype=bool).cuda()
         cutoff = torch.std(conv_mat)*q
+        cutoff = cutoff * (1.0 / (n_chunks*(n_chunks+1)/2))
         
         for chunk_idx in range(n_chunks):
             current_cascade = conv_mat[chunk_idx * chunk_size:, :, :, :]
             l1_norm = torch.sum(torch.abs(current_cascade), dim=0) / (self.out_channels - (chunk_idx * chunk_size))
+            # scale the norm
+            l1_norm = l1_norm * ((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
             next_mask = (l1_norm > cutoff).repeat((self.out_channels - (chunk_idx * chunk_size)), 1, 1, 1)
             mask[chunk_idx * chunk_size:, :, :, :] = torch.logical_and(mask[chunk_idx * chunk_size:, :, :, :], next_mask)
 
@@ -495,7 +501,7 @@ class PrunedConv(nn.Module):
 
             l2_norm = torch.sqrt(torch.sum(current_cascade ** 2, dim=0) / (self.out_channels - (chunk_idx * chunk_size)))
             # use triangular number to scale norm
-            l2_norm = l2_norm * ((chunk_idx*(chunk_idx+1)/2) / (n_chunks*(n_chunks+1)/2))
+            l2_norm = l2_norm * ((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
             chunk_loss = torch.sum(torch.abs(l2_norm))
             layer_loss += chunk_loss
 
