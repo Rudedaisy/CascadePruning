@@ -6,14 +6,16 @@ import math
 class Quant8F(Function):
 
     @staticmethod
-    def forward(cxt, input, dim=None, quant=8):
+    def forward(cxt, input, dim=None, quant=8, _scale=None, _initial_zero_point=None):
         #if not isinstance(dim, int):
         #    raise NotImplemented("Currently Only Support Selecting One Dimension.")
         
         if dim!=None and input.shape[dim] < 2:
             return input
 
-        if dim == None:
+        if _scale != None:
+            output = ((input/_scale + _initial_zero_point).round_().clamp_(min=0, max=(2**quant-1)) - _initial_zero_point) * _scale
+        elif dim == None:
             scale = (torch.max(input) - torch.min(input)) / 255
             if scale == 0:
                 #scale = 1

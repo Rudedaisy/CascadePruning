@@ -55,9 +55,30 @@ class casConv2d(torch.nn.Module):
         if isinstance(self.dilation, int):
             self.dilation = (self.dilation, self.dilation)
 
+    def set_quant_params(self, x, quant=8):
+        dim = 1
+        out = self.conv2d_module.forward(x)
+        out = out.reshape(1, self.out_channels, -1)
+
+        scale = (1.0/(2**quant-1)) * (torch.max(out, dim=dim, keepdim=False)[0] - torch.min(out, dim=dim, keepdim=False)[0])
+        #assert torch.sum(scale == 0).data[0] == 0
+        initial_zero_point = 0 + -1*torch.div(torch.min(out, dim=dim, keepdim=False)[0], scale)
+        initial_zero_point[initial_zero_point<0] = 0
+        initial_zero_point[initial_zero_point>(2**quant-1)] = (2**quant-1)
+        initial_zero_point[initial_zero_point != initial_zero_point] = 0
+        initial_zero_point = initial_zero_point.int()
+
+        scale = scale.repeat(1, 1, x.shape[2], x.shape[3])
+        initial_zero_point = initial_zero_point.repeat(1, 1, x.shape[2], x.shape[3])
+
+        self.scale = scale
+        self.initial_zero_point = initial_zero_point
+        return
+
     def forward(self, x):
         #Standard conv2d to see mse result
         #output_baseline = self.conv2d_module.forward(x)
+        self.set_quant_params(x, self.quant)
         
         #Calculate Output shape
         o_shape = [(x.shape[2] + 2*self.padding[0]-self.dilation[0] * (self.kernel_size[0]-1) - 1)//self.stride[0] + 1,
@@ -102,7 +123,7 @@ class casConv2d(torch.nn.Module):
         #Now we quantize the tensor along partial sum dimension
         #for chunk in range(pre_quant_accu.shape[2]):
         #    pre_quant_accu[:,:,chunk] = self.quant_func.apply(pre_quant_accu[:,:,chunk])
-        quant_accu = self.quant_func.apply(pre_quant_accu, 2, self.quant)
+        quant_accu = self.quant_func.apply(pre_quant_accu, 2, self.quant, self.scale, self.initial_zero_point)
         del pre_quant_accu
         #quant_accu = pre_quant_accu
         
