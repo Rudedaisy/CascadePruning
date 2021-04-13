@@ -10,7 +10,7 @@ import argparse
 import sys
 
 from models import utils
-from models import vgg16, vgg_in, resnet, resnet_in, inception_v3
+from models import vgg16, vgg_in, resnet, resnet_in, inception_v3, inception_v3_c10
 from models import helpers
 
 parser = argparse.ArgumentParser(description='Bounded Structured Sparsity')
@@ -72,7 +72,7 @@ elif args.model == "inception_v3":
     if args.dataset == "ImageNet":
         model = inception_v3.gluon_inception_v3(pretrained=True)
     else:
-        print("Model {} no supported on this dataset!".format(args.model))
+        model = inception_v3_c10.inception_v3()
 else:
     print("Model {} not supported!".format(args.model))
     sys.exit(0)
@@ -129,7 +129,7 @@ if not args.skip_pt:
     elif args.dataset == "ImageNet":
         utils.train_imagenet(model, epochs=args.epochs, batch_size=args.batch, lr=args.lr, reg=args.reg,
                              checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
-                             scheduler='step', finetune=False, amp=True, lmdb=True)
+                             scheduler='step', data_dir='/root/hostPublic/ImageNetLMDB_NAS/', finetune=False, amp=True, lmdb=True)
     else:
         print("Dataset {} not suported!".format(args.dataset))
         sys.exit(0)
@@ -148,7 +148,7 @@ print("-----Summary before pruning-----")
 summary(model)
 print("-------------------------------")
 
-sys.exit(0) ########## REMOVE IF PRUNING AND FINETUNEING
+#sys.exit(0) ########## REMOVE IF PRUNING AND FINETUNEING
 
 # --------------------------------------- #
 # --- Pruning and finetune -------------- #
@@ -182,7 +182,7 @@ if args.dataset=="CIFAR10":
 elif args.dataset == "ImageNet":
     utils.train_imagenet(model, epochs=args.epochs_ft, batch_size=args.batch, lr=args.lr, reg=args.reg,
                          checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
-                         scheduler='step', finetune=True, amp=True, lmdb=True)
+                         scheduler='step', data_dir='/root/hostPublic/ImageNetLMDB_NAS/', finetune=True, amp=True, lmdb=True)
 else:
     print("Dataset {} not suported!".format(args.dataset))
     sys.exit(0)
