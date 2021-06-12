@@ -27,6 +27,7 @@ parser.add_argument('--lr', type=float, default=0.01, help='pretrain initial lea
 parser.add_argument('--reg', type=float, default=5e-4, help='pretrain reg strength, default=5e-4')
 parser.add_argument('--spar-reg', type=str, default='v2', help='sparsity regularizer type, options: [None, v1, v2, SSL]')
 parser.add_argument('--spar-str', type=float, default=1e-4, help='sparsity reg strength, default=1e-4')
+parser.add_argument('--scratch', action='store_false', default=True, help='train from scratch, default=False[ImageNet]')
 
 parser.add_argument('--prune-type', type=str, default='cascade', help='pruning scheme, options: [percentage, std, dil, asym_dil, sintf, chunk, cascade, SSL]')
 parser.add_argument('--q', type=float, default=0, help='prune threshold, will default to prune-type\'s default if not specified')
@@ -60,17 +61,17 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 if args.model == "vgg16":
     if args.dataset == "ImageNet":
-        model = vgg_in.vgg16_bn(pretrained=True)
+        model = vgg_in.vgg16_bn(pretrained=args.scratch)
     else:
         model = vgg16.VGG16()
 elif args.model == "resnet50":
     if args.dataset == "ImageNet":
-        model = resnet_in.resnet50(pretrained=True)
+        model = resnet_in.resnet50(pretrained=args.scratch)
     else:
         model = resnet.ResNet50()
 elif args.model == "inception_v3":
     if args.dataset == "ImageNet":
-        model = inception_v3.gluon_inception_v3(pretrained=True)
+        model = inception_v3.gluon_inception_v3(pretrained=args.scratch)
     else:
         model = inception_v3_c10.inception_v3()
 else:
@@ -83,8 +84,14 @@ model = model.to(device)
     
 def replace_with_pruned(m, name):    
     #print(m)
+    print("{}, {}".format(name, str(type(m))))
     if type(m) == PrunedConv or type(m) == PrunedLinear:
         return
+
+    # HACK: directly replace conv layers of downsamples
+    if name == "downsample":
+        m[0] = PrunedConv(m[0])
+    
     for attr_str in dir(m):
         target_attr = getattr(m, attr_str)
         if type(target_attr) == torch.nn.Conv2d:
@@ -96,6 +103,7 @@ def replace_with_pruned(m, name):
 
     for n, ch in m.named_children():
         replace_with_pruned(ch, n)
+
 
 if args.model != "vgg16":
     replace_with_pruned(model, "model")
@@ -129,7 +137,7 @@ if not args.skip_pt:
     elif args.dataset == "ImageNet":
         utils.train_imagenet(model, epochs=args.epochs, batch_size=args.batch, lr=args.lr, reg=args.reg,
                              checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
-                             scheduler='step', data_dir='/root/hostPublic/ImageNetLMDB_NAS/', finetune=False, amp=True, lmdb=True)
+                             scheduler='step', data_dir='/root/hostPublic/ImageNet/', finetune=False, amp=True, lmdb=True)
     else:
         print("Dataset {} not suported!".format(args.dataset))
         sys.exit(0)
@@ -182,7 +190,7 @@ if args.dataset=="CIFAR10":
 elif args.dataset == "ImageNet":
     utils.train_imagenet(model, epochs=args.epochs_ft, batch_size=args.batch, lr=args.lr, reg=args.reg,
                          checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
-                         scheduler='step', data_dir='/root/hostPublic/ImageNetLMDB_NAS/', finetune=True, amp=True, lmdb=True)
+                         scheduler='step', data_dir='/root/hostPublic/ImageNet/', finetune=True, amp=True, lmdb=True)
 else:
     print("Dataset {} not suported!".format(args.dataset))
     sys.exit(0)

@@ -1,5 +1,6 @@
 from vgg16 import VGG16, VGG16_half, VGG16_5
 from resnet import *
+from models import vgg16, vgg_in, resnet, resnet_in, inception_v3, inception_v3_c10
 import torch
 import torch.nn as nn
 import numpy as np
@@ -18,24 +19,61 @@ args = parser.parse_args()
 
 assert (args.path != '')
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-#net = ResNet50()
-net = VGG16()
-net = net.to(device)
+def replace_with_pruned(m, name):
+    if type(m) == PrunedConv or type(m) == PrunedLinear:
+        return
+    for attr_str in dir(m):
+        target_attr = getattr(m, attr_str)
+        if type(target_attr) == torch.nn.Conv2d:
+            print("Replaced CONV")
+            setattr(m, attr_str, PrunedConv(target_attr))
+        elif type(target_attr) == torch.nn.Linear:
+            print("Replaced Linear")
+            setattr(m, attr_str, PrunedLinear(target_attr))
 
-net.load_state_dict(torch.load(args.path))
+    for n, ch in m.named_children():
+        replace_with_pruned(ch, n)
+
+def replace_vgg16(model):
+    for i in range(len(model.features)):
+        print(model.features[i])
+        if isinstance(model.features[i], torch.nn.Conv2d):
+            print("Replaced CONV")
+            model.features[i] = PrunedConv(model.features[i])
+    for i in range(len(model.classifier)):
+        if isinstance(model.classifier[i], torch.nn.Linear):
+            print("Replaced Linear")
+            model.classifier[i] = PrunedLinear(model.classifier[i])
+    return model
+        
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+model = resnet.ResNet50()
+#model = resnet_in.resnet50()
+#model = vgg16.VGG16()
+#model = inception_v3_c10.inception_v3()
+model = model.to(device)
+
+replace_with_pruned(model, "model")
+#model = replace_vgg16(model)
+
+#if not torch.distributed.is_initialized():
+#    port = np.random.randint(10000, 65536)
+#    torch.distributed.init_process_group(backend='nccl', init_method='tcp://127.0.0.1:%d'%port, rank=0, world_size=1)
+#model = torch.nn.parallel.DistributedDataParallel(model)
+
+model.load_state_dict(torch.load(args.path))
 
 layers = []
 widths = [3]
-assert isinstance(net, nn.Module)
-for n, m in net.named_modules():
+assert isinstance(model, nn.Module)
+for n, m in model.named_modules():
     if isinstance(m, PrunedConv):
         layer = m.conv.weight.view((m.out_channels, -1)).detach().cpu().numpy()
-    elif isinstance(m, PruneLinear):
+    elif isinstance(m, PrunedLinear):
         layer = m.linear.weight.view((m.out_features, -1)).detach().cpu().numpy()
     else:
         continue
-        
+    
     #print(n)
     #print(layer.shape)
 
@@ -44,6 +82,7 @@ for n, m in net.named_modules():
     
     layerMask = layer > 0
     layerMask = np.transpose(layerMask)
+"""
     # print info
     #YB = range(m.out_channels)
     #XB = range(len(layer))
@@ -51,7 +90,7 @@ for n, m in net.named_modules():
     #plt.imshow(layer,interpolation='none')
     plt.imsave('images/' + str(n) + '.png', layerMask)
     #break
-
+"""
 sq_ptrs = []
 full_ptrs = []
 ratios = []
@@ -118,6 +157,11 @@ for idx in range(len(accelerator_ptrs)):
 for idx in range(len(total_ptrs)-1):
     total_ptrs[idx] -= total_ptrs[idx+1]
 
+print(total_ptrs)
+print(accelerator_ptrs)
+
+exit(0)
+
 print("Chunk count statistics")
 print("ALPHA for dynamic power metric: {}".format(alpha))
 print("Mean: {}".format(weightedMean))
@@ -143,6 +187,8 @@ ax.set_ylabel('Frequency', fontsize='large')
 ax.grid(True)
 #plt.yscale('log')
 plt.savefig('images/acceleratorChunks.png')
+
+exit(0)
 
 full = list(map(truediv, full_ptrs[14], full_ptrs[14]))
 fig, ax = plt.subplots()
