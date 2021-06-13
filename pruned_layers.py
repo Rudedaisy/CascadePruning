@@ -19,12 +19,14 @@ class PrunedLinear(nn.Module):
         m = self.in_features
         n = self.out_features
         self.sparsity = 1.0
+        self.finetune = False
         # Initailization
         #self.linear.weight.data.normal_(0, math.sqrt(2. / (m+n)))
         
     def forward(self, x):
-        device = torch.device('cuda', torch.distributed.get_rank())
-        self.gl_loss = self.compute_group_lasso_v2(device=device)
+        if not self.finetune:
+            device = torch.device('cuda', torch.distributed.get_rank())
+            self.gl_loss = self.compute_group_lasso_v2(device=device)
         out = self.linear(x)
         #out = quant8(out, None) # last layer should NOT be quantized
 
@@ -269,6 +271,7 @@ class PrunedConv(nn.Module):
         self.dilation = conv2d_module.dilation
         self.bias = conv2d_module.bias
         self.conv = conv2d_module
+        self.finetune = False
         #self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias, dilation=dilation)
 
         # Expand and Transpose to match the dimension
@@ -281,9 +284,10 @@ class PrunedConv(nn.Module):
         self.sparsity = 1.0
 
     def forward(self, x):
+        if not self.finetune:
         #Compute Gorup Lasso at forward
-        device = torch.device('cuda', torch.distributed.get_rank())
-        self.gl_loss = self.compute_group_lasso_v2(device=device)
+            device = torch.device('cuda', torch.distributed.get_rank())
+            self.gl_loss = self.compute_group_lasso_v2(device=device)
 
         out = self.conv(x)
         #out = quant8(out, None)

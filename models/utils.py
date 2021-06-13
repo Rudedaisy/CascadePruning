@@ -786,7 +786,12 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
         if isinstance(m, DecomposedConv2D):
             m.coefs.requires_grad = True
             m.basis.requires_grad = True
-
+    for n, m in model.named_modules():
+        if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
+            if finetune:
+                m.finetune = True
+            else:
+                m.finetune = False
 
     end = time.time()
     for epoch in range(start_epoch, epochs):
