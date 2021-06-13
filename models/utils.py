@@ -824,7 +824,7 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
         #            m.coefs.requires_grad = True
         #            m.basis.requires_grad = True
 
-        prefetcher = data_prefetcher(trainloader)
+        prefetcher = data_prefetcher(trainloader, device)
         inputs, targets = prefetcher.next()
         batch_idx = 0
         while inputs is not None:
@@ -1063,11 +1063,12 @@ def _eval(model, testloader, device='cuda'):
     return top1.avg, top5.avg
 
 class data_prefetcher():
-    def __init__(self, loader):
+    def __init__(self, loader, device=None):
         self.loader = iter(loader)
+        self.device = device
         self.stream = torch.cuda.Stream()
-        self.mean = torch.tensor([0.485, 0.456, 0.406]).cuda().view(1,3,1,1)
-        self.std = torch.tensor([0.229, 0.224, 0.225]).cuda().view(1,3,1,1)
+        self.mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1,3,1,1)
+        self.std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1,3,1,1)
         # With Amp, it isn't necessary to manually convert data to half.
         # if args.fp16:
         #     self.mean = self.mean.half()
@@ -1089,8 +1090,8 @@ class data_prefetcher():
         # at the time we start copying to next_*:
         # self.stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(self.stream):
-            self.next_input = self.next_input.cuda(non_blocking=True)
-            self.next_target = self.next_target.cuda(non_blocking=True)
+            self.next_input = self.next_input.to(self.device, non_blocking=True)
+            self.next_target = self.next_target.to(self.device, non_blocking=True)
             # more code for the alternative if record_stream() doesn't work:
             # copy_ will record the use of the pinned source tensor in this side stream.
             # self.next_input_gpu.copy_(self.next_input, non_blocking=True)
