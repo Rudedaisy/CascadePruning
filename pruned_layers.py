@@ -23,6 +23,8 @@ class PrunedLinear(nn.Module):
         #self.linear.weight.data.normal_(0, math.sqrt(2. / (m+n)))
         
     def forward(self, x):
+        device = torch.device('cuda', torch.distributed.get_rank())
+        self.gl_loss = self.compute_group_lasso_v2(device=device)
         out = self.linear(x)
         #out = quant8(out, None) # last layer should NOT be quantized
 
@@ -213,24 +215,38 @@ class PrunedLinear(nn.Module):
         return layer_loss
 
     # cascading bounded sparsity - attempt 1
-    def compute_group_lasso_v2(self, chunk_size = 32):
-        layer_loss = torch.zeros(1).cuda()
-        
+    def compute_group_lasso_v2(self, chunk_size = 32, device=None):        
         last_chunk =  self.out_features % chunk_size
         n_chunks = self.out_features // chunk_size + (last_chunk != 0)
         
         linear_mat = self.linear.weight.view((self.out_features, -1))
+        layer_loss = torch.zeros(n_chunks).to(device)
+
+        chunk_ids = torch.arange(n_chunks-1, -1, -1).to(device)
+        scaling_factor = ((n_chunks - chunk_ids) / (n_chunks*(n_chunks+1)/2))
+
+        # #print(linear_mat.shape)
+
+        # linear_mat = nn.functional.pad(linear_mat, pad=( 0, 0, 0, chunk_size - last_chunk))
+
+        # #print(linear_mat.shape)
+        # #Linear Mat: chunk_size * n_chunks, other_dim
+        # linear_mat = linear_mat.reshape(chunk_size, n_chunks, -1).sum(dim=0)
+
+        # #print(linear_mat.shape)
+        # #Linear Mat: n_chunks, other_dim
+        # linear_mat = linear_mat.fliplr().pow(2).cumsum(dim=0).div((self.out_features - chunk_ids * chunk_size).reshape(-1, 1)).abs().sum(dim=1)
+
         
         for chunk_idx in range(n_chunks-1, -1, -1):
             current_cascade = linear_mat[chunk_idx * chunk_size:, :]
             
-            l2_norm = torch.sqrt(torch.sum(current_cascade ** 2, dim=0) / (self.out_features - (chunk_idx * chunk_size)))
+            l2_norm = torch.norm(current_cascade, p=2, dim=0)#torch.sqrt(torch.sum(current_cascade ** 2, dim=0) / (self.out_features - (chunk_idx * chunk_size)))
             # use triangular number to scale norm
-            l2_norm = l2_norm *	((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
-            chunk_loss = torch.sum(torch.abs(l2_norm))
-            layer_loss += chunk_loss
+            #l2_norm = l2_norm *	((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
+            layer_loss[chunk_idx] = l2_norm.abs().sum()
 
-        return layer_loss
+        return torch.sum(layer_loss * scaling_factor)
 
     def compute_SSL(self):
         layer_loss = torch.zeros(1).cuda()
@@ -265,6 +281,10 @@ class PrunedConv(nn.Module):
         self.sparsity = 1.0
 
     def forward(self, x):
+        #Compute Gorup Lasso at forward
+        device = torch.device('cuda', torch.distributed.get_rank())
+        self.gl_loss = self.compute_group_lasso_v2(device=device)
+
         out = self.conv(x)
         #out = quant8(out, None)
         return out
@@ -488,24 +508,51 @@ class PrunedConv(nn.Module):
         return layer_loss
 
     # cascading bounded sparsity - attempt 1
-    def compute_group_lasso_v2(self, chunk_size = 32):
-        layer_loss = torch.zeros(1).cuda()
-        
+    def compute_group_lasso_v2(self, chunk_size = 32, device = None):
         last_chunk =  self.out_channels % chunk_size
         n_chunks = self.out_channels // chunk_size + (last_chunk != 0)
         
         conv_mat = self.conv.weight.view((self.out_channels, -1))
+
+        layer_loss = torch.zeros(n_chunks).to(device)
+
+        chunk_ids = torch.arange(n_chunks-1, -1, -1).to(device)
+        scaling_factor = ((n_chunks - chunk_ids) / (n_chunks*(n_chunks+1)/2))
+
+        # #print(linear_mat.shape)
+
+        # linear_mat = nn.functional.pad(linear_mat, pad=( 0, 0, 0, chunk_size - last_chunk))
+
+        # #print(linear_mat.shape)
+        # #Linear Mat: chunk_size * n_chunks, other_dim
+        # linear_mat = linear_mat.reshape(chunk_size, n_chunks, -1).sum(dim=0)
+
+        # #print(linear_mat.shape)
+        # #Linear Mat: n_chunks, other_dim
+        # linear_mat = linear_mat.fliplr().pow(2).cumsum(dim=0).div((self.out_features - chunk_ids * chunk_size).reshape(-1, 1)).abs().sum(dim=1)
+
         
         for chunk_idx in range(n_chunks-1, -1, -1):
             current_cascade = conv_mat[chunk_idx * chunk_size:, :]
-
-            l2_norm = torch.sqrt(torch.sum(current_cascade ** 2, dim=0) / (self.out_channels - (chunk_idx * chunk_size)))
+            
+            l2_norm = torch.norm(current_cascade, p=2, dim=0)#torch.sqrt(torch.sum(current_cascade ** 2, dim=0) / (self.out_features - (chunk_idx * chunk_size)))
             # use triangular number to scale norm
-            l2_norm = l2_norm * ((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
-            chunk_loss = torch.sum(torch.abs(l2_norm))
-            layer_loss += chunk_loss
+            #l2_norm = l2_norm *	((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
+            layer_loss[chunk_idx] = l2_norm.abs().sum()
+        # layer_loss = torch.zeros(1).cuda()
+        
+        
+        
+        # for chunk_idx in range(n_chunks-1, -1, -1):
+        #     current_cascade = conv_mat[chunk_idx * chunk_size:, :]
 
-        return layer_loss
+        #     l2_norm = torch.sqrt(torch.sum(current_cascade ** 2, dim=0) / (self.out_channels - (chunk_idx * chunk_size)))
+        #     # use triangular number to scale norm
+        #     l2_norm = l2_norm * ((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
+        #     chunk_loss = torch.sum(torch.abs(l2_norm))
+        #     layer_loss += chunk_loss
+
+        return torch.sum(layer_loss * scaling_factor)
 
     def compute_SSL(self):
         layer_loss = torch.zeros(1).cuda()

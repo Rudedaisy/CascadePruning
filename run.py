@@ -9,6 +9,10 @@ from pruned_layers import *
 import argparse
 import sys
 
+import argparse
+import random
+import numpy as np
+
 from models import utils
 from models import vgg16, vgg_in, resnet, resnet_in, inception_v3, inception_v3_c10
 from models import helpers
@@ -37,7 +41,31 @@ parser.add_argument('--epochs-ft', type=int, default=50, help='finetune number o
 parser.add_argument('--lr-ft', type=float, default=0.001, help='finetune initial learning rate, default=0.001')
 parser.add_argument('--reg-ft', type=float, default=5e-6, help='finetune reg strength, default=5e-6')
 
+parser.add_argument("--local_rank", type=int, default=-1)
+
 args = parser.parse_args()
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    #torch.set_deterministic(True)
+
+set_seed(42)
+torch.cuda.set_device(args.local_rank)
+torch.distributed.init_process_group(backend='nccl', init_method='env://')
+
+world_size = torch.distributed.get_world_size()
+local_rank = torch.distributed.get_rank()
+
+device = torch.device('cuda', args.local_rank)
+print(device)
+
+#Scale single process batch_size and learning rate accordingly
+eff_bs = args.batch // world_size
+eff_lr = args.lr * np.sqrt(world_size)
+eff_lr_ft = args.lr_ft * np.sqrt(world_size)
 
 assert ((not args.skip_pt) or (args.path != ''))
 
@@ -53,7 +81,7 @@ if args.q == 0:
     elif args.prune_type == 'cascade':
         args.q = 0.75
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+#device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # --------------------------------------- #
 # --- Full precision model load/train --- #
@@ -118,8 +146,10 @@ else:
             print("Replaced Linear")
             model.classifier[i] = PrunedLinear(model.classifier[i])
 
-for layer in model.named_modules():
-    print(layer)
+if local_rank == 0:
+        
+    for layer in model.named_modules():
+        print(layer)
 
 # Uncomment to load pretrained weights
 #model.load_state_dict(torch.load("model_before_pruning.pt"))
@@ -135,7 +165,7 @@ if not args.skip_pt:
                             checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
                             scheduler='step', finetune=False, cross=False, cross_interval=5)
     elif args.dataset == "ImageNet":
-        utils.train_imagenet(model, epochs=args.epochs, batch_size=args.batch, lr=args.lr, reg=args.reg,
+        utils.train_imagenet(model, epochs=args.epochs, batch_size=eff_bs, lr=eff_lr, reg=args.reg, device=device,
                              checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
                              scheduler='step', data_dir='/root/hostPublic/ImageNet/', finetune=False, amp=True, lmdb=True)
     else:
@@ -148,7 +178,7 @@ else:
     #        torch.distributed.init_process_group(backend='nccl', init_method='tcp://127.0.0.1:%d'%port, rank=0, world_size=1)
     #    model = torch.nn.parallel.DistributedDataParallel(model)
 
-    model.load_state_dict(torch.load(args.path))
+    model.load_state_dict(torch.load(args.path, map_location=device),)
     #helpers.load_state_dict(args.path)
     print("Model loaded from {}".format(args.path))
 
@@ -188,7 +218,7 @@ if args.dataset=="CIFAR10":
                         checkpoint_path = args.ckpt_dir_ft, spar_reg = args.spar_reg, spar_param = args.spar_str,
                         scheduler='step', finetune=True, cross=False, cross_interval=5)
 elif args.dataset == "ImageNet":
-    utils.train_imagenet(model, epochs=args.epochs_ft, batch_size=args.batch, lr=args.lr, reg=args.reg,
+    utils.train_imagenet(model, epochs=args.epochs_ft, batch_size=eff_bs, lr=eff_lr_ft, reg=args.reg, device=device,
                          checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
                          scheduler='step', data_dir='/root/hostPublic/ImageNet/', finetune=True, amp=True, lmdb=True)
 else:

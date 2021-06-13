@@ -29,6 +29,8 @@ from tensorboardX import SummaryWriter
 from models.dataset_lmdb import ImageFolderLMDB
 from pruned_layers import *
 
+import torch.profiler as profiler
+
 import numpy as np
 import tqdm
 import datetime
@@ -610,23 +612,20 @@ def eval_cifar10(model, batch_size=128):
     return val_acc
 
 def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
-                  checkpoint_path = '', spar_reg = None, spar_param = 0.0,
+                  checkpoint_path = '', spar_reg = None, spar_param = 0.0, device='cuda',
                   scheduler='step', finetune=False, cross=False, cross_interval=5,
                    data_dir="/root/hostPublic/ImageNet/", amp=False, lmdb=False):
     #data_dir="../../ILSVRC/Data/CLS-LOC/", amp=False, lmdb=False
     #):
+    
+    local_rank = torch.distributed.get_rank()
 
-    if not torch.distributed.is_initialized():
-        port = np.random.randint(10000, 65536)
-        torch.distributed.init_process_group(backend='nccl', init_method='tcp://127.0.0.1:%d'%port, rank=0, world_size=1)
-
-    model.cuda()
     torch.backends.cudnn.benchmark = True
     if amp:
         model.ena_amp = True
     # DistributedDataParallel will divide and allocate batch_size to all
     # available GPUs if device_ids are not set
-    model = torch.nn.parallel.DistributedDataParallel(model)
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
 
     print("Loading Data...")
 
@@ -676,11 +675,11 @@ def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
 
     testloader = torch.utils.data.DataLoader(
         val_dataset,batch_size=256, shuffle=False, sampler=val_sampler,
-        num_workers=16, pin_memory=True)
+        num_workers=4, pin_memory=True)
 
     trainloader = torch.utils.data.DataLoader(
         train_dataset, batch_size=batch_size, shuffle=False, sampler=train_sampler,
-        num_workers=32, pin_memory=True)
+        num_workers=8, pin_memory=True)
 
     #optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=reg, nesterov=True)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay = reg, eps=1.0)
@@ -694,13 +693,14 @@ def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
         _load_checkpoint(model, optimizer, checkpoint_path, scheduler)
 
     _train(model, trainloader, testloader, optimizer, epochs,
-           scheduler, checkpoint_path, finetune=finetune,
+           scheduler, checkpoint_path, finetune=finetune, device=device,
            cross=cross, cross_interval=cross_interval,
            spar_method=spar_reg, spar_reg=spar_param,
            sampler=train_sampler, ena_amp=amp)
 
-def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=False):
+def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=False, device='cuda'):
     torch.backends.cudnn.benchmark = True
+    local_rank = torch.distributed.get_rank()
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     print("Loading Validation Data...")
@@ -728,19 +728,16 @@ def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=Fal
     if amp:
         model.ena_amp = True
 
-    if not torch.distributed.is_initialized():
-        port = np.random.randint(10000, 65536)
-        torch.distributed.init_process_group(backend='nccl', init_method='tcp://127.0.0.1:%d'%port, rank=0, world_size=1)
         
     # DistributedDataParallel will divide and allocate batch_size to all
     # available GPUs if device_ids are not set
-    model = torch.nn.parallel.DistributedDataParallel(model)
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
     val_loader = torch.utils.data.DataLoader(
         val_dataset,batch_size=256, shuffle=False, sampler=val_sampler,
-	num_workers=16, pin_memory=True)
+	num_workers=8, pin_memory=True)
     
-    return _eval(model, val_loader)
+    return _eval(model, val_loader, device)
 
 #Fix for 1x1 Conv layer's SGL
 def compute_sgl(m, chunk_size = 32):
@@ -763,6 +760,8 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
            checkpoint_path='', save_interval=2, device='cuda', finetune=False,
            cross=False, cross_interval=5, spar_method=None, spar_reg = 0.0, sampler=None, ena_amp=False):
 
+    local_rank = torch.distributed.get_rank()
+
     if not finetune:
         start_epoch, best_acc = _load_checkpoint(model, optimizer, checkpoint_path, scheduler)
     else:
@@ -778,7 +777,7 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
     log_dir = os.path.join(checkpoint_path, 'log')
     writer = SummaryWriter(log_dir)
 
-    criterion = nn.CrossEntropyLoss().cuda()
+    criterion = nn.CrossEntropyLoss().to(device)
     if ena_amp:
         scaler = amp.GradScaler()
 
@@ -832,7 +831,9 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                     outputs = model(inputs)
                     loss = criterion(outputs, targets)
                     loss = loss.view(1)
-                    reg_loss = torch.zeros_like(loss).to('cuda')
+                    reg_loss = torch.zeros_like(loss).to(device)
+
+
                     # Sparsity Regularization
                     if spar_method == 'l1':
                         for n, m in model.named_parameters():
@@ -865,7 +866,7 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                         #print("HERE")
                         for n, m in model.named_modules():
                             if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
-                                reg_loss += m.compute_group_lasso_v2()
+                                reg_loss += m.gl_loss#m.compute_group_lasso_v2(device=device)
 
                     loss += reg_loss * spar_reg
                 scaler.scale(loss).backward()
@@ -875,7 +876,7 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                 loss = criterion(outputs, targets)
                 loss = loss.view(1)
                 # Sparsity Regularization
-                reg_loss = torch.zeros_like(loss).to('cuda')
+                reg_loss = torch.zeros_like(loss).to(device)
                 if spar_method == 'l1':
                     for n, m in model.named_parameters():
                         if "coef" in n:
@@ -884,7 +885,7 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                         if isinstance(m, nn.Conv2d) and m.weight.shape[2] == 1:  # Prune 1x1 convolution
                             reg_loss += torch.sum(torch.abs(m.weight))
                 elif spar_method == 'naive_l1':
-                    reg_loss = torch.zeros_like(loss).to('cuda')
+                    reg_loss = torch.zeros_like(loss).to(device)
                     for n, m in model.named_modules():
                         if isinstance(m, nn.Conv2d):
                             reg_loss += torch.sum(torch.abs(m.weight))
@@ -903,7 +904,7 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                 elif spar_method == 'v2' and not finetune:
                     for n, m in model.named_modules():
                         if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
-                            reg_loss += m.compute_group_lasso_v2()
+                            reg_loss += m.gl_loss#m.compute_group_lasso_v2(device=device)
                 loss += reg_loss * spar_reg
                 loss.backward()
                 losses.update(loss.item(), inputs.size(0))
@@ -940,64 +941,50 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
             else:
                 optimizer.step()
 
-            torch.cuda.synchronize()
-            batch_time.update(time.time() - end)
-            end = time.time()
+            inputs, targets = prefetcher.next()
+            #Prefetch and avoid sync
+            #torch.cuda.synchronize()
 
             if batch_idx % 16 == 0:
                 n_step = epoch * len(trainloader) + batch_idx
-                progress.display(batch_idx)
-                if ena_amp:
-                    writer.add_scalar('Train/Loss', scaler.scale(loss).item(), n_step)
-                else:
-                    writer.add_scalar('Train/Loss', loss.item(), n_step)
-                writer.add_scalar('Train/Top1 ACC', top1.avg, n_step)
-                writer.add_scalar('Train/Top5 ACC', top5.avg, n_step)
-            inputs, targets = prefetcher.next()
+                if local_rank ==0:
+                    progress.display(batch_idx)                    
+                    if ena_amp:
+                        writer.add_scalar('Train/Loss', scaler.scale(loss).item(), n_step)
+                    else:
+                        writer.add_scalar('Train/Loss', loss.item(), n_step)
+                    writer.add_scalar('Train/Top1 ACC', top1.avg, n_step)
+                    writer.add_scalar('Train/Top5 ACC', top5.avg, n_step)
+
+
+            batch_time.update(time.time() - end)
+            end = time.time()
 
         if scheduler is not None:
             scheduler.step()
 
         val_acc, top5_acc = _eval(model, testloader, device)
-        writer.add_scalar('Test/Top1 Acc', val_acc, epoch)
-        writer.add_scalar('Test/Top5 Acc', top5_acc, epoch)
+        if local_rank ==0:
+            writer.add_scalar('Test/Top1 Acc', val_acc, epoch)
+            writer.add_scalar('Test/Top5 Acc', top5_acc, epoch)
 
-        sparse = 0
-        total = 0
-        if spar_method == 'l1':
-            for n, m in model.named_parameters():
-                if 'coef' in n:
-                    sparse += np.prod(list(m[m<=1e-7].shape))
-                    total += np.prod(list(m.shape))
-            print("Sparsity Level %.3f" % (sparse/total))
-        elif spar_method == 'naive_l1':
-            for n, m in model.named_modules():
-                if isinstance(m, nn.Conv2d):
-                    sparse += np.prod(list(m.weight[m.weight<=1e-7].shape))
-                    total += np.prod(list(m.weight.shape))
-            print("Sparsity Level %.3f" % (sparse/total))
-        elif spar_method == 'sgl':
-                scores = []
-                for n, m in model.named_modules():
-                    if isinstance(m, DecomposedConv2D):
-                       #print("OK")
-                       scores.append(m.compute_chunk_score(chunk_size=10))
-                print("Layer Scores:", scores)
-                print("Total Avg Scores:", np.mean(scores))
+            if val_acc > best_acc:
+                best_acc = val_acc
+                print("Saving Weight...")
+                if os.path.exists(best_acc_path):
+                    os.remove(best_acc_path)
+                best_acc_path = os.path.join(checkpoint_path, "retrain_weight_%d_%.2f.pt"%(epoch, best_acc))
+                torch.save(model.state_dict(), best_acc_path)
 
-        if val_acc > best_acc:
-            best_acc = val_acc
-            print("Saving Weight...")
-            if os.path.exists(best_acc_path):
-                os.remove(best_acc_path)
-            best_acc_path = os.path.join(checkpoint_path, "retrain_weight_%d_%.2f.pt"%(epoch, best_acc))
-            torch.save(model.state_dict(), best_acc_path)
+            if (epoch+1) % save_interval == 0:
+                _save_checkpoint(model, optimizer, epoch, best_acc, checkpoint_path, scheduler)
 
-        if (epoch+1) % save_interval == 0:
-            _save_checkpoint(model, optimizer, epoch, best_acc, checkpoint_path, scheduler)
-        torch.cuda.empty_cache()
+        else:
+            if val_acc > best_acc:
+                best_acc = val_acc
 
     return best_acc
+
 def compute_chunk_score_post(m, chunk_size, tol=0.0):
 	last_chunk = (m.out_channels) % chunk_size
 	n_chunks = (m.out_channels) // chunk_size + (last_chunk != 0)
@@ -1021,7 +1008,10 @@ def compute_chunk_score_post(m, chunk_size, tol=0.0):
 	return total_score.cpu().item() / n_chunks, total_nz_chunks, n_chunks * m.in_channels
 
 def _eval(model, testloader, device='cuda'):
-    criterion = nn.CrossEntropyLoss().cuda()
+    local_rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+
+    criterion = nn.CrossEntropyLoss().to(device)
     model.eval()
     batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
@@ -1033,7 +1023,7 @@ def _eval(model, testloader, device='cuda'):
         prefix='Test: ')
 
     with torch.no_grad():
-        prefetcher = data_prefetcher(testloader)
+        prefetcher = data_prefetcher(testloader, device)
         inputs, targets = prefetcher.next()
         batch_idx = 0
         end = time.time()
@@ -1042,21 +1032,27 @@ def _eval(model, testloader, device='cuda'):
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs)
             loss = criterion(outputs, targets)
+            #Gather Loss
+            torch.distributed.all_reduce(loss, torch.distributed.ReduceOp.SUM) 
 
             # measure accuracy and record loss
             acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
-            losses.update(loss.item(), targets.size(0))
-            top1.update(acc1[0], targets.size(0))
-            top5.update(acc5[0], targets.size(0))
+            torch.distributed.all_reduce(acc1, torch.distributed.ReduceOp.SUM) 
+            torch.distributed.all_reduce(acc5, torch.distributed.ReduceOp.SUM) 
+
+            losses.update(loss.item()/world_size, targets.size(0))
+            top1.update(acc1[0]/world_size, targets.size(0))
+            top5.update(acc5[0]/world_size, targets.size(0))
 
             # measure elapsed time
             batch_time.update(time.time() - end)
             end = time.time()
 
             inputs, targets = prefetcher.next()
-            if batch_idx % 10 == 0:
+            if batch_idx % 10 == 0 and local_rank == 0:
                 progress.display(batch_idx)
-        print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+        if local_rank == 0:
+            print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
               .format(top1=top1, top5=top5))
 
     return top1.avg, top5.avg
