@@ -29,7 +29,7 @@ from tensorboardX import SummaryWriter
 from models.dataset_lmdb import ImageFolderLMDB
 from pruned_layers import *
 
-import torch.profiler as profiler
+#import torch.profiler as profiler
 
 import numpy as np
 import tqdm
@@ -872,7 +872,8 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                         for n, m in model.named_modules():
                             if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                                 reg_loss += m.gl_loss#m.compute_group_lasso_v2(device=device)
-
+                    #print("Loss before reg: {}".format(loss))
+                    #print("Loss of reg: {}".format(reg_loss * spar_reg))
                     loss += reg_loss * spar_reg
                 scaler.scale(loss).backward()
                 losses.update(scaler.scale(loss).item(), inputs.size(0))

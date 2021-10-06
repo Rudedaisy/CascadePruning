@@ -247,7 +247,7 @@ class PrunedLinear(nn.Module):
             # use triangular number to scale norm
             #l2_norm = l2_norm *	((n_chunks - chunk_idx) / (n_chunks*(n_chunks+1)/2))
             layer_loss[chunk_idx] = l2_norm.abs().sum()
-
+    
         return torch.sum(layer_loss * scaling_factor)
 
     def compute_SSL(self):

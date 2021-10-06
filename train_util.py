@@ -394,18 +394,21 @@ def _train(dataset, model, trainloader, testloader,  optimizer, epochs, batch_si
                 reg_loss = torch.zeros_like(loss).to('cuda')
                 if spar_reg == 'v1':
                     for n, m in model.named_modules():
-                        if isinstance(m, PrunedConv) or isinstance(m, PruneLinear):
+                        if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                             reg_loss += m.compute_group_lasso_v1()
                 if spar_reg == 'v2':
                     for n, m in model.named_modules():
-                        if isinstance(m, PrunedConv) or isinstance(m, PruneLinear):
+                        if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                             reg_loss += m.compute_group_lasso_v2()
                 if spar_reg == 'SSL':
                     for n, m in model.named_modules():
-                        if isinstance(m, PrunedConv) or isinstance(m, PruneLinear):
+                        if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                             reg_loss += m.compute_SSL()
 
+                #print("Loss before reg: {}".format(loss))
+                #print("Loss of reg: {}".format(reg_loss * spar_param))
                 loss += reg_loss * spar_param
+                
 
             loss.backward()
 
@@ -421,7 +424,7 @@ def _train(dataset, model, trainloader, testloader,  optimizer, epochs, batch_si
                 for n, m in model.named_modules():
                     if isinstance(m, PrunedConv):
                         m.conv.weight.grad = m.conv.weight.grad.float() * m.mask.float()
-                    if isinstance(m, PruneLinear):
+                    if isinstance(m, PrunedLinear):
                         m.linear.weight.grad = m.linear.weight.grad.float() * m.mask.float()
             
             optimizer.step()

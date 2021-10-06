@@ -21,7 +21,7 @@ parser = argparse.ArgumentParser(description='Bounded Structured Sparsity')
 
 parser.add_argument('--skip-pt', action='store_true', default=False, help='skip pretrain and simply load weights directly')
 parser.add_argument('--path', type=str, default='', help='file to load pretrained weights from')
-parser.add_argument('--model', type=str, default='vgg16', help='model to use, options: [vgg16, resnet50, inception_v3]')
+parser.add_argument('--model', type=str, default='vgg16', help='model to use, options: [vgg16, resnet50, inception_v3, alexnet]')
 parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset to train on: [CIFAR10, ImageNet]')
 
 parser.add_argument('--ckpt-dir', type=str, default='', help='checkpoint save/load directory, default=ckpt/<modelName><time>/')
@@ -102,6 +102,12 @@ elif args.model == "inception_v3":
         model = inception_v3.gluon_inception_v3(pretrained=args.scratch)
     else:
         model = inception_v3_c10.inception_v3()
+elif args.model == "alexnet":
+    if args.dataset == "ImageNet":
+        model = torch.hub.load('pytorch/vision', 'alexnet', pretrained=args.scratch)
+    else:
+        print("Model {} not supported!".format(args.model))
+        sys.exit(0)
 else:
     print("Model {} not supported!".format(args.model))
     sys.exit(0)
@@ -133,7 +139,7 @@ def replace_with_pruned(m, name):
         replace_with_pruned(ch, n)
 
 
-if args.model != "vgg16":
+if args.model != "vgg16" and args.model != "alexnet":
     replace_with_pruned(model, "model")
 else:
     for i in range(len(model.features)):
@@ -186,7 +192,7 @@ print("-----Summary before pruning-----")
 summary(model)
 print("-------------------------------")
 
-#sys.exit(0) ########## REMOVE IF PRUNING AND FINETUNEING
+sys.exit(0) ########## REMOVE IF PRUNING AND FINETUNEING
 
 # --------------------------------------- #
 # --- Pruning and finetune -------------- #

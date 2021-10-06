@@ -11,6 +11,10 @@ def summary(net):
     layer_id = 0
     num_total_params = 0
     num_total_nonzero_params = 0
+    num_conv_params = 0
+    num_conv_nonzero_params = 0
+    num_linear_params = 0
+    num_linear_nonzero_params = 0
     for n, m in net.named_modules():
         if isinstance(m, PrunedLinear):
             weight = m.linear.weight.data.cpu().numpy()
@@ -22,6 +26,8 @@ def summary(net):
             print("%d\t\tLinear\t\t%d\t\t%d\t\t\t%f" %(layer_id, num_parameters, num_nonzero_parameters, sparisty))
             num_total_params += num_parameters
             num_total_nonzero_params += num_nonzero_parameters
+            num_linear_params += num_parameters
+            num_linear_nonzero_params += num_nonzero_parameters
         elif isinstance(m, PrunedConv):
             weight = m.conv.weight.data.cpu().numpy()
             weight = weight.flatten()
@@ -32,6 +38,8 @@ def summary(net):
             print("%d\t\tConvolutional\t%d\t\t%d\t\t\t%f" % (layer_id, num_parameters, num_nonzero_parameters, sparisty))
             num_total_params += num_parameters
             num_total_nonzero_params += num_nonzero_parameters
+            num_conv_params += num_parameters
+            num_conv_nonzero_params += num_nonzero_parameters
         elif isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm1d):
             layer_id += 1
             print("%d\t\tBatchNorm\tN/A\t\tN/A\t\t\tN/A" % (layer_id))
@@ -42,5 +50,9 @@ def summary(net):
     print("Total nonzero parameters: %d" %num_total_nonzero_params)
     print("Total parameters: %d" %num_total_params)
     total_sparisty = 1. - num_total_nonzero_params / num_total_params
+    conv_sparsity = 1. - num_conv_nonzero_params / num_conv_params
+    linear_sparsity = 1. - num_linear_nonzero_params / num_linear_params
+    print("Conv sparsity: %f" %conv_sparsity)
+    print("Linear sparsity: %f" %linear_sparsity)
     print("Total sparsity: %f" %total_sparisty)
 
