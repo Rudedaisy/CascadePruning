@@ -29,6 +29,8 @@ from tensorboardX import SummaryWriter
 from models.dataset_lmdb import ImageFolderLMDB
 from pruned_layers import *
 
+from models.autoaugment import ImageNetPolicy
+
 #import torch.profiler as profiler
 
 import numpy as np
@@ -641,15 +643,16 @@ def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
                            transforms.Resize(256),
                            transforms.CenterCrop(224),
                            transforms.ToTensor(),
-                           #normalize,
+                           #normalize, ## MAY NEED TO REMOVE
                        ]))
 
         train_dataset = ImageFolderLMDB(traindir,
                          transforms.Compose([
                              transforms.RandomResizedCrop(224),
                              transforms.RandomHorizontalFlip(),
+                             #ImageNetPolicy(),
                              transforms.ToTensor(),
-                             #normalize,
+                             #normalize, ## MAY NEED TO REMOVE
                          ]))
     else:
         traindir = os.path.join(data_dir, 'train')
@@ -659,15 +662,16 @@ def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
                 transforms.Resize(256),
                 transforms.CenterCrop(224),
                 transforms.ToTensor(),
-                #normalize,
+                #normalize, ## MAY NEED TO REMOVE
             ]))
 
         train_dataset = datasets.ImageFolder(traindir,
             transforms.Compose([
                 transforms.RandomResizedCrop(224),
                 transforms.RandomHorizontalFlip(),
+                ImageNetPolicy(),
                 transforms.ToTensor(),
-                #normalize,
+                #normalize, ## MAY NEED TO REMOVE
             ]))
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
@@ -712,6 +716,7 @@ def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=Fal
                                           transforms.Resize(256),
                                           transforms.CenterCrop(224),
                                           transforms.ToTensor(),
+                                          #normalize, ## MAY NEED TO REMOVE
                                       ]))
     else:
         valdir = os.path.join(valdir, 'val')
@@ -720,6 +725,7 @@ def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=Fal
                                                transforms.Resize(256),
                                                transforms.CenterCrop(224),
                                                transforms.ToTensor(),
+                                               #normalize, ## MAY NEED TO REMOVE
                                            ]))
         
     #val_loader = torch.utils.data.DataLoader(
