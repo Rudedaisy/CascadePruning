@@ -650,7 +650,7 @@ def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
                          transforms.Compose([
                              transforms.RandomResizedCrop(224),
                              transforms.RandomHorizontalFlip(),
-                             #ImageNetPolicy(),
+                             ImageNetPolicy(),
                              transforms.ToTensor(),
                              #normalize, ## MAY NEED TO REMOVE
                          ]))
