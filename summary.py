@@ -16,8 +16,11 @@ def summary(net):
     num_linear_params = 0
     num_linear_nonzero_params = 0
     for n, m in net.named_modules():
-        if isinstance(m, PrunedLinear):
-            weight = m.linear.weight.data.cpu().numpy()
+        if isinstance(m, PrunedLinear) or isinstance(m, nn.Linear):
+            if isinstance(m, PrunedLinear):
+                weight = m.linear.weight.data.cpu().numpy()
+            else:
+                weight = m.weight.data.cpu().numpy()
             weight = weight.flatten()
             num_parameters = weight.shape[0]
             num_nonzero_parameters = (weight != 0).sum()
@@ -28,8 +31,11 @@ def summary(net):
             num_total_nonzero_params += num_nonzero_parameters
             num_linear_params += num_parameters
             num_linear_nonzero_params += num_nonzero_parameters
-        elif isinstance(m, PrunedConv):
-            weight = m.conv.weight.data.cpu().numpy()
+        elif isinstance(m, PrunedConv) or isinstance(m, nn.Conv2d):
+            if isinstance(m, PrunedConv):
+                weight = m.conv.weight.data.cpu().numpy()
+            else:
+                weight = m.weight.data.cpu().numpy()
             weight = weight.flatten()
             num_parameters = weight.shape[0]
             num_nonzero_parameters = (weight != 0).sum()
@@ -49,9 +55,9 @@ def summary(net):
 
     print("Total nonzero parameters: %d" %num_total_nonzero_params)
     print("Total parameters: %d" %num_total_params)
-    total_sparisty = 1. - num_total_nonzero_params / num_total_params
-    conv_sparsity = 1. - num_conv_nonzero_params / num_conv_params
-    linear_sparsity = 1. - num_linear_nonzero_params / num_linear_params
+    total_sparisty = 1. - num_total_nonzero_params / max([1,num_total_params])
+    conv_sparsity = 1. - num_conv_nonzero_params / max([1,num_conv_params])
+    linear_sparsity = 1. - num_linear_nonzero_params / max([1,num_linear_params])
     print("Conv sparsity: %f" %conv_sparsity)
     print("Linear sparsity: %f" %linear_sparsity)
     print("Total sparsity: %f" %total_sparisty)

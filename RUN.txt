@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=2,3, python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 run.py --model alexnet --dataset ImageNet --batch 512 --epochs 100 --epochs-ft 30 --spar-str 1e-4 --q 0.75 

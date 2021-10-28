@@ -33,6 +33,7 @@ parser.add_argument('--spar-reg', type=str, default='v2', help='sparsity regular
 parser.add_argument('--spar-str', type=float, default=1e-4, help='sparsity reg strength, default=1e-4')
 parser.add_argument('--scratch', action='store_false', default=True, help='train from scratch, default=False[ImageNet]')
 
+parser.add_argument('--prune', action='store_true', default=False, help='apply prune, then finetune -- WARNING: must be a separate process from the initial pre-/re-training stage!')
 parser.add_argument('--prune-type', type=str, default='cascade', help='pruning scheme, options: [percentage, std, dil, asym_dil, sintf, chunk, cascade, SSL]')
 parser.add_argument('--q', type=float, default=0, help='prune threshold, will default to prune-type\'s default if not specified')
 
@@ -97,6 +98,12 @@ elif args.model == "resnet50":
         model = resnet_in.resnet50(pretrained=args.scratch)
     else:
         model = resnet.ResNet50()
+elif args.model == "resnet152":
+    if args.dataset == "ImageNet":
+        model = resnet_in.resnet152(pretrained=args.scratch)
+    else:
+        print("Model {} not supported!".format(args.model))
+        sys.exit(0)
 elif args.model == "inception_v3":
     if args.dataset == "ImageNet":
         model = inception_v3.gluon_inception_v3(pretrained=args.scratch)
@@ -147,15 +154,16 @@ else:
         if isinstance(model.features[i], torch.nn.Conv2d):
             print("Replaced CONV")
             model.features[i] = PrunedConv(model.features[i])
-    for i in range(len(model.classifier)):
-        if isinstance(model.classifier[i], torch.nn.Linear):
-            print("Replaced Linear")
-            model.classifier[i] = PrunedLinear(model.classifier[i])
+    #for i in range(len(model.classifier)):
+    #    if isinstance(model.classifier[i], torch.nn.Linear):
+    #        print("Replaced Linear")
+    #        model.classifier[i] = PrunedLinear(model.classifier[i])
 
 if local_rank == 0:
         
     for layer in model.named_modules():
         print(layer)
+print("WARNING: only CONV layers are targetted for pruning")
 
 # Uncomment to load pretrained weights
 #model.load_state_dict(torch.load("model_before_pruning.pt"))
@@ -192,7 +200,8 @@ print("-----Summary before pruning-----")
 summary(model)
 print("-------------------------------")
 
-sys.exit(0) ########## REMOVE IF PRUNING AND FINETUNEING
+if not args.prune:
+    sys.exit(0)
 
 # --------------------------------------- #
 # --- Pruning and finetune -------------- #

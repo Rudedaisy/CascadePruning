@@ -249,7 +249,7 @@ class PrunedLinear(nn.Module):
             layer_loss[chunk_idx] = l2_norm.abs().sum()
     
         return torch.sum(layer_loss * scaling_factor)
-
+        
     def compute_SSL(self):
         layer_loss = torch.zeros(1).cuda()
         
@@ -557,7 +557,7 @@ class PrunedConv(nn.Module):
         #     layer_loss += chunk_loss
 
         return torch.sum(layer_loss * scaling_factor)
-
+    
     def compute_SSL(self):
         layer_loss = torch.zeros(1).cuda()
 
