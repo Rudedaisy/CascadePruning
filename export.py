@@ -24,7 +24,6 @@ import statistics
 
 from prune import prune
 
-skipLinear = False
 skipLinearExport = True
 
 #parser = argparse.ArgumentParser(description='Quick analysis')
@@ -144,7 +143,6 @@ def replace_vgg16(model, skipLinear=False):
         
 def exportData(pathName, modelName):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    global skipLinear
     if modelName=="vgg16_c10":
         model = vgg16.VGG16()
     elif modelName=="vgg16_c10_old":
@@ -159,6 +157,7 @@ def exportData(pathName, modelName):
         skipLinear = True
     elif modelName=="vgg16_in":
         model = vgg_in.vgg16()
+        skipLinear = True
     elif modelName=="resnet50_in":
         model = resnet_in.resnet50()
     elif modelName=="transformer_wmt":
