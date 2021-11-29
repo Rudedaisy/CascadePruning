@@ -14,8 +14,9 @@ import random
 import numpy as np
 
 from models import utils
-from models import vgg16, vgg_in, resnet, resnet_in, inception_v3, inception_v3_c10
+from models import vgg16, vgg_in, resnet, resnet_in, inception_v3, inception_v3_c10, mobilenetv3
 from models import helpers
+from models.efficientnet.model import EfficientNet
 
 parser = argparse.ArgumentParser(description='Bounded Structured Sparsity')
 
@@ -23,12 +24,14 @@ parser.add_argument('--skip-pt', action='store_true', default=False, help='skip 
 parser.add_argument('--path', type=str, default='', help='file to load pretrained weights from')
 parser.add_argument('--model', type=str, default='vgg16', help='model to use, options: [vgg16, resnet50, inception_v3, alexnet]')
 parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset to train on: [CIFAR10, ImageNet]')
+parser.add_argument("--data-dir", type=str, default='/root/hostPublic/ImageNet/', help="the path to dataset folder.")
 
 parser.add_argument('--ckpt-dir', type=str, default='', help='checkpoint save/load directory, default=ckpt/<modelName><time>/')
 parser.add_argument('--epochs', type=int, default=100, help='pretrain number of epochs, default=100')
 parser.add_argument('--batch', type=int, default=128, help='pretrain and finetune batch size, default=128')
 parser.add_argument('--lr', type=float, default=0.01, help='pretrain initial learning rate, default=0.01')
 parser.add_argument('--reg', type=float, default=5e-4, help='pretrain reg strength, default=5e-4')
+parser.add_argument('--scheduler', type=str, default='cosine', help="scheduler ['step', 'cosine','coswm']")
 parser.add_argument('--spar-reg', type=str, default='v2', help='sparsity regularizer type, options: [None, v1, v2, SSL]')
 parser.add_argument('--spar-str', type=float, default=1e-4, help='sparsity reg strength, default=1e-4')
 parser.add_argument('--scratch', action='store_false', default=True, help='train from scratch, default=False[ImageNet]')
@@ -90,7 +93,7 @@ if args.q == 0:
 
 if args.model == "vgg16":
     if args.dataset == "ImageNet":
-        model = vgg_in.vgg16_bn(pretrained=args.scratch)
+        model = vgg_in.vgg16(pretrained=args.scratch)
     else:
         model = vgg16.VGG16()
 elif args.model == "resnet50":
@@ -111,10 +114,17 @@ elif args.model == "inception_v3":
         model = inception_v3_c10.inception_v3()
 elif args.model == "alexnet":
     if args.dataset == "ImageNet":
-        model = torch.hub.load('pytorch/vision', 'alexnet', pretrained=args.scratch)
+        model = torch.hub.load('pytorch/vision:v0.10.0', 'alexnet', pretrained=args.scratch)
+        #Remove dropout for the retraining
+        #model.classifier[0] = torch.nn.Identity()
     else:
         print("Model {} not supported!".format(args.model))
         sys.exit(0)
+elif args.model == "efficientnet":
+    model = EfficientNet.from_pretrained('efficientnet-b1')
+elif args.model == 'mbnetv3':
+    model = mobilenetv3.mobilenetv3_large()
+    model.load_state_dict(torch.load("ckpt/mobilenetv3-large-1cd25616.pth"))
 else:
     print("Model {} not supported!".format(args.model))
     sys.exit(0)
@@ -181,7 +191,7 @@ if not args.skip_pt:
     elif args.dataset == "ImageNet":
         utils.train_imagenet(model, epochs=args.epochs, batch_size=eff_bs, lr=eff_lr, reg=args.reg, device=device,
                              checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
-                             scheduler='step', data_dir='/root/hostPublic/ImageNet/', finetune=False, amp=True, lmdb=True)
+                             scheduler=args.scheduler, data_dir=args.data_dir, finetune=False, amp=True, lmdb=True)
     else:
         print("Dataset {} not suported!".format(args.dataset))
         sys.exit(0)
@@ -235,7 +245,7 @@ if args.dataset=="CIFAR10":
 elif args.dataset == "ImageNet":
     utils.train_imagenet(model, epochs=args.epochs_ft, batch_size=eff_bs, lr=eff_lr_ft, reg=args.reg, device=device,
                          checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
-                         scheduler='step', data_dir='/root/hostPublic/ImageNet/', finetune=True, amp=True, lmdb=True)
+                         scheduler=args.scheduler, data_dir=args.data_dir, finetune=True, amp=True, lmdb=True)
 else:
     print("Dataset {} not suported!".format(args.dataset))
     sys.exit(0)
