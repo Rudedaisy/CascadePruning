@@ -9,6 +9,8 @@ from pruned_layers import *
 import argparse
 import sys
 
+import pickle
+
 import argparse
 import random
 import numpy as np
@@ -37,6 +39,7 @@ parser.add_argument('--spar-str', type=float, default=1e-4, help='sparsity reg s
 parser.add_argument('--scratch', action='store_false', default=True, help='train from scratch, default=False[ImageNet]')
 
 parser.add_argument('--prune', action='store_true', default=False, help='apply prune, then finetune -- WARNING: must be a separate process from the initial pre-/re-training stage!')
+parser.add_argument('--chunk-size', type=int, default=32, help='chunk size of structural pruning methods')
 parser.add_argument('--prune-type', type=str, default='cascade', help='pruning scheme, options: [percentage, std, dil, asym_dil, sintf, chunk, cascade, SSL]')
 parser.add_argument('--q', type=float, default=0, help='prune threshold, will default to prune-type\'s default if not specified')
 
@@ -141,16 +144,16 @@ def replace_with_pruned(m, name):
 
     # HACK: directly replace conv layers of downsamples
     if name == "downsample":
-        m[0] = PrunedConv(m[0])
+        m[0] = PrunedConv(m[0], args.chunk_size)
     
     for attr_str in dir(m):
         target_attr = getattr(m, attr_str)
         if type(target_attr) == torch.nn.Conv2d:
             print("Replaced CONV")
-            setattr(m, attr_str, PrunedConv(target_attr))
+            setattr(m, attr_str, PrunedConv(target_attr, args.chunk_size))
         elif type(target_attr) == torch.nn.Linear:
             print("Replaced Linear")
-            setattr(m, attr_str, PrunedLinear(target_attr))
+            setattr(m, attr_str, PrunedLinear(target_attr, args.chunk_size))
 
     for n, ch in m.named_children():
         replace_with_pruned(ch, n)
@@ -163,11 +166,11 @@ else:
         print(model.features[i])
         if isinstance(model.features[i], torch.nn.Conv2d):
             print("Replaced CONV")
-            model.features[i] = PrunedConv(model.features[i])
+            model.features[i] = PrunedConv(model.features[i], args.chunk_size)
     #for i in range(len(model.classifier)):
     #    if isinstance(model.classifier[i], torch.nn.Linear):
     #        print("Replaced Linear")
-    #        model.classifier[i] = PrunedLinear(model.classifier[i])
+    #        model.classifier[i] = PrunedLinear(model.classifier[i], args.chunk_size)
 
 if local_rank == 0:
         
@@ -209,6 +212,8 @@ else:
 print("-----Summary before pruning-----")
 summary(model)
 print("-------------------------------")
+
+pickle.dump(model, open("foo.pkl","wb"))
 
 if not args.prune:
     sys.exit(0)

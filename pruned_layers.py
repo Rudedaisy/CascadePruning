@@ -7,8 +7,10 @@ from quantize import *
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+DIST = False
+
 class PrunedLinear(nn.Module):
-    def __init__(self, linear_module):
+    def __init__(self, linear_module, chunk_size=32):
         assert isinstance(linear_module, torch.nn.Linear), "Input Module is not a valid linear operator!"
         super(PrunedLinear, self).__init__()
         self.in_features = linear_module.in_features
@@ -20,12 +22,17 @@ class PrunedLinear(nn.Module):
         n = self.out_features
         self.sparsity = 1.0
         self.finetune = False
+        self.chunk_size = chunk_size
+        self.extracted = False
         # Initailization
         #self.linear.weight.data.normal_(0, math.sqrt(2. / (m+n)))
         
     def forward(self, x):
         if not self.finetune:
-            device = torch.device('cuda', torch.distributed.get_rank())
+            if DIST:
+                device = torch.device('cuda', torch.distributed.get_rank())
+            else:
+                device = torch.device('cuda')
             self.gl_loss = self.compute_group_lasso_v2(device=device)
         out = self.linear(x)
         #out = quant8(out, None) # last layer should NOT be quantized
@@ -94,7 +101,8 @@ class PrunedLinear(nn.Module):
         # calculate sparsity
         self.sparsity = self.linear.weight.data.numel() - self.linear.weight.data.nonzero().size(0)
 
-    def prune_chunk(self, chunk_size = 32, q = 0.75):
+    def prune_chunk(self, q = 0.75):
+        chunk_size = self.chunk_size
         last_chunk =  self.out_features % chunk_size
         n_chunks = self.out_features // chunk_size + (last_chunk != 0)
 
@@ -119,7 +127,8 @@ class PrunedLinear(nn.Module):
         # calculate sparsity
         self.sparsity = self.linear.weight.data.numel() - self.linear.weight.data.nonzero().size(0)
         
-    def prune_cascade_l1(self, chunk_size = 32, q = 0.75):
+    def prune_cascade_l1(self, q = 0.75):
+        chunk_size = self.chunk_size
         last_chunk =  self.out_features % chunk_size
         n_chunks = self.out_features // chunk_size + (last_chunk != 0)
         
@@ -152,8 +161,9 @@ class PrunedLinear(nn.Module):
         # calculate sparsity
         self.sparsity = self.linear.weight.data.numel() - self.linear.weight.data.nonzero().size(0)
 
-    def prune_filter_chunk(self, chunk_size = 32, q = 0.75):
+    def prune_filter_chunk(self, q = 0.75):
         """
+        chunk_size = self.chunk_size
         last_chunk =  self.out_features % chunk_size
         n_chunks = self.out_features // chunk_size + (last_chunk != 0)
         
@@ -195,7 +205,8 @@ class PrunedLinear(nn.Module):
         self.sparsity = self.linear.weight.data.numel() - self.linear.weight.data.nonzero().size(0)
 
     # Group Lasso for v1 chunk pruning
-    def compute_group_lasso_v1(self, chunk_size = 32):
+    def compute_group_lasso_v1(self):
+        chunk_size = self.chunk_size
         layer_loss = torch.zeros(1).cuda()
         
         last_chunk =  self.out_features % chunk_size
@@ -217,7 +228,8 @@ class PrunedLinear(nn.Module):
         return layer_loss
 
     # cascading bounded sparsity - attempt 1
-    def compute_group_lasso_v2(self, chunk_size = 32, device=None):        
+    def compute_group_lasso_v2(self, device=None):
+        chunk_size = self.chunk_size
         last_chunk =  self.out_features % chunk_size
         n_chunks = self.out_features // chunk_size + (last_chunk != 0)
         
@@ -260,7 +272,7 @@ class PrunedLinear(nn.Module):
         return layer_loss
         
 class PrunedConv(nn.Module):
-    def __init__(self, conv2d_module):
+    def __init__(self, conv2d_module, chunk_size=32):
         super(PrunedConv, self).__init__()
         assert isinstance(conv2d_module, torch.nn.Conv2d), "Input Module is not a valid conv operator!"                                                                                      
         self.in_channels = conv2d_module.in_channels
@@ -272,6 +284,8 @@ class PrunedConv(nn.Module):
         self.bias = conv2d_module.bias
         self.conv = conv2d_module
         self.finetune = False
+        self.chunk_size = chunk_size
+        self.extracted = False
         #self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias, dilation=dilation)
 
         # Expand and Transpose to match the dimension
@@ -286,7 +300,10 @@ class PrunedConv(nn.Module):
     def forward(self, x):
         if not self.finetune:
         #Compute Gorup Lasso at forward
-            device = torch.device('cuda', torch.distributed.get_rank())
+            if DIST:
+                device = torch.device('cuda', torch.distributed.get_rank())
+            else:
+                device = torch.device('cuda')
             self.gl_loss = self.compute_group_lasso_v2(device=device)
 
         out = self.conv(x)
@@ -391,7 +408,8 @@ class PrunedConv(nn.Module):
         # calculate sparsity
         self.sparsity = self.conv.weight.data.numel() - self.conv.weight.data.nonzero().size(0)
 
-    def prune_chunk(self, chunk_size = 32, q = 0.75):
+    def prune_chunk(self, q = 0.75):
+        chunk_size = self.chunk_size
         last_chunk =  self.out_channels % chunk_size
         n_chunks = self.out_channels // chunk_size + (last_chunk != 0)
         
@@ -417,7 +435,8 @@ class PrunedConv(nn.Module):
         # calculate sparsity
         self.sparsity = self.conv.weight.data.numel() - self.conv.weight.data.nonzero().size(0)
         
-    def prune_cascade_l1(self, chunk_size = 32, q = 0.75):
+    def prune_cascade_l1(self, q = 0.75):
+        chunk_size = self.chunk_size
         last_chunk =  self.out_channels % chunk_size
         n_chunks = self.out_channels // chunk_size + (last_chunk != 0)
 
@@ -450,7 +469,8 @@ class PrunedConv(nn.Module):
         # calculate sparsity
         self.sparsity = self.conv.weight.data.numel() - self.conv.weight.data.nonzero().size(0)
 
-    def prune_filter_chunk(self, chunk_size = 32, q = 0.75):
+    def prune_filter_chunk(self, q = 0.75):
+        chunk_size = self.chunk_size
         last_chunk =  self.out_channels % chunk_size
         n_chunks = self.out_channels // chunk_size + (last_chunk != 0)
         
@@ -490,7 +510,8 @@ class PrunedConv(nn.Module):
         self.sparsity = self.conv.weight.data.numel() - self.conv.weight.data.nonzero().size(0)
         
     # Group Lasso for v1 chunk pruning
-    def compute_group_lasso_v1(self, chunk_size = 32):
+    def compute_group_lasso_v1(self):
+        chunk_size = self.chunk_size
         layer_loss = torch.zeros(1).cuda()
         
         last_chunk =  self.out_channels % chunk_size
@@ -512,7 +533,8 @@ class PrunedConv(nn.Module):
         return layer_loss
 
     # cascading bounded sparsity - attempt 1
-    def compute_group_lasso_v2(self, chunk_size = 32, device = None):
+    def compute_group_lasso_v2(self, device = None):
+        chunk_size = self.chunk_size
         last_chunk =  self.out_channels % chunk_size
         n_chunks = self.out_channels // chunk_size + (last_chunk != 0)
         
