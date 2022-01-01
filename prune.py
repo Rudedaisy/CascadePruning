@@ -26,3 +26,6 @@ def prune(net, method='std', q=5.0):
                 #m.prune_filter_chunk(q=q) ##### not a good idea to do 2-stage prune naively
             elif method == 'SSL':
                 m.prune_SSL(q)
+            elif method == 'cs':
+                # Cambricon-S
+                m.prune_CambriconS(q)

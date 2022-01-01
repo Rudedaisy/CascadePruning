@@ -19,6 +19,7 @@ from models import utils
 from models import vgg16, vgg_in, resnet, resnet_in, inception_v3, inception_v3_c10, mobilenetv3
 from models import helpers
 from models.efficientnet.model import EfficientNet
+from models.efficientnet.utils import Conv2dStaticSamePadding
 
 parser = argparse.ArgumentParser(description='Bounded Structured Sparsity')
 
@@ -40,7 +41,7 @@ parser.add_argument('--scratch', action='store_false', default=True, help='train
 
 parser.add_argument('--prune', action='store_true', default=False, help='apply prune, then finetune -- WARNING: must be a separate process from the initial pre-/re-training stage!')
 parser.add_argument('--chunk-size', type=int, default=32, help='chunk size of structural pruning methods')
-parser.add_argument('--prune-type', type=str, default='cascade', help='pruning scheme, options: [percentage, std, dil, asym_dil, sintf, chunk, cascade, SSL]')
+parser.add_argument('--prune-type', type=str, default='cascade', help='pruning scheme, options: [percentage, std, dil, asym_dil, sintf, chunk, cascade, SSL, cs]')
 parser.add_argument('--q', type=float, default=0, help='prune threshold, will default to prune-type\'s default if not specified')
 
 parser.add_argument('--ckpt-dir-ft', type=str, default='', help='finetune checkpoint directory, default=ckpt/finetune_<modelName><time>/')
@@ -148,7 +149,7 @@ def replace_with_pruned(m, name):
     
     for attr_str in dir(m):
         target_attr = getattr(m, attr_str)
-        if type(target_attr) == torch.nn.Conv2d:
+        if type(target_attr) == torch.nn.Conv2d or type(target_attr) == Conv2dStaticSamePadding:
             print("Replaced CONV")
             setattr(m, attr_str, PrunedConv(target_attr, args.chunk_size))
         elif type(target_attr) == torch.nn.Linear:
@@ -216,6 +217,7 @@ print("-------------------------------")
 pickle.dump(model, open("foo.pkl","wb"))
 
 if not args.prune:
+    print("Option to prune and finetune not chosen. Exiting")
     sys.exit(0)
 
 # --------------------------------------- #

@@ -204,6 +204,30 @@ class PrunedLinear(nn.Module):
         # calculate sparsity
         self.sparsity = self.linear.weight.data.numel() - self.linear.weight.data.nonzero().size(0)
 
+    def prune_CambriconS(self, q):
+        # q = Wt in the Cambricon-S paper
+        print("WARN: not pruning linear layers")
+        return
+        chunk_size = self.chunk_size
+        linear_mat = self.linear.weight.data
+        mask = torch.full(linear_mat.shape, True, dtype=bool).cuda()
+        cutoff = torch.std(linear_mat)*q
+
+        # update the mask
+        for i in range(0, self.out_features, self.chunk_size):
+            i_end = i+self.chunk_size if i+self.chunk_size < self.out_features else self.out_features
+            for j in range(0, self.in_features, self.chunk_size):
+                j_end = j+self.chunk_size if j+self.chunk_size < self.in_features else self.in_features
+                avg = torch.mean(torch.abs(linear_mat[i:i_end, j:j_end]))
+                if avg < cutoff:
+                    linear_mat[i:i_end, j:j_end] = torch.tensor([[False]*self.in_features]*self.out_features).cuda()
+
+        self.mask = mask
+        # prune the weights
+        self.linear.weight.data = self.linear.weight.float() * self.mask.float()
+        # calculate sparsity
+        self.sparsity = self.linear.weight.data.numel() - self.linear.weight.data.nonzero().size(0)
+        
     # Group Lasso for v1 chunk pruning
     def compute_group_lasso_v1(self):
         chunk_size = self.chunk_size
@@ -215,15 +239,21 @@ class PrunedLinear(nn.Module):
         linear_mat = self.linear.weight.view((self.out_features, -1))
         
         for chunk_idx in range(n_chunks):
-            if chunk_idx == n_chunks - 1 and last_chunk != 0:
-                current_chunk = linear_mat[chunk_idx * chunk_size:, :]
-                l2_norm = torch.sqrt(torch.sum(current_chunk ** 2, dim=0) / last_chunk)
-            else:
-                current_chunk = linear_mat[chunk_idx * chunk_size:(chunk_idx + 1) * chunk_size, :]
-                l2_norm = torch.sqrt(torch.sum(current_chunk ** 2, dim=0) / chunk_size)
+            for j in range(0, self.in_features, chunk_size):
+                j_end = j+chunk_size if j+chunk_size < self.in_features else self.in_features
+                if chunk_idx == n_chunks - 1 and last_chunk != 0:
+                    current_chunk = linear_mat[chunk_idx * chunk_size:, j:j_end]
+                    divisor = last_chunk*(j_end-j)
+                    #l2_norm = torch.sqrt(torch.sum(current_chunk ** 2, dim=0) / last_chunk)
+                    l2_norm = torch.sqrt(torch.sum(current_chunk ** 2) / divisor)
+                else:
+                    current_chunk = linear_mat[chunk_idx * chunk_size:(chunk_idx + 1) * chunk_size, j:j_end]
+                    divisor = chunk_size*(j_end-j)
+                    #l2_norm = torch.sqrt(torch.sum(current_chunk ** 2, dim=0) / chunk_size)
+                    l2_norm = torch.sqrt(torch.sum(current_chunk ** 2) / divisor)
                 
-            chunk_loss = torch.sum(torch.abs(l2_norm))
-            layer_loss += chunk_loss
+                chunk_loss = torch.sum(torch.abs(l2_norm))
+                layer_loss += chunk_loss
             
         return layer_loss
 
@@ -408,7 +438,7 @@ class PrunedConv(nn.Module):
         # calculate sparsity
         self.sparsity = self.conv.weight.data.numel() - self.conv.weight.data.nonzero().size(0)
 
-    def prune_chunk(self, q = 0.75):
+    def prune_CambriconS(self, q = 0.75):
         chunk_size = self.chunk_size
         last_chunk =  self.out_channels % chunk_size
         n_chunks = self.out_channels // chunk_size + (last_chunk != 0)
@@ -416,7 +446,7 @@ class PrunedConv(nn.Module):
         conv_mat = self.conv.weight.data
         mask = torch.full(conv_mat.shape, True, dtype=bool).cuda()
         cutoff = torch.std(conv_mat)*q
-        
+
         for chunk_idx in range(n_chunks):
             if chunk_idx == n_chunks - 1 and last_chunk != 0:
                 current_chunk = conv_mat[chunk_idx * chunk_size:, :]
@@ -453,16 +483,6 @@ class PrunedConv(nn.Module):
             next_mask = (l1_norm > cutoff).repeat((self.out_channels - (chunk_idx * chunk_size)), 1, 1, 1)
             mask[chunk_idx * chunk_size:, :, :, :] = torch.logical_and(mask[chunk_idx * chunk_size:, :, :, :], next_mask)
 
-            # PRUNE FILTER CHUNKS
-            #if (chunk_idx+1) * chunk_size > self.out_channels:
-            #    end = self.out_channels
-            #else:
-            #    end = (chunk_idx+1) * chunk_size
-            #current_chunk = conv_mat[chunk_idx * chunk_size:end, :, :, :]
-            #l1_norm = torch.sum(torch.abs(current_chunk)) / ((end - (chunk_idx * chunk_size)) * self.in_channels * self.kernel_size[0] * self.kernel_size[1])
-            #next_mask = (l1_norm > cutoff).repeat((end - (chunk_idx * chunk_size)), self.in_channels, self.kernel_size[0], self.kernel_size[1])
-            #mask[chunk_idx * chunk_size:end, :, :, :] = torch.logical_and(mask[chunk_idx * chunk_size:end, :, :, :], next_mask)
-            
         self.mask = mask
         # prune the weights
         self.conv.weight.data = self.conv.weight.float() * self.mask.float()
@@ -508,7 +528,7 @@ class PrunedConv(nn.Module):
         self.conv.weight.data = self.conv.weight.float() * self.mask.float()
         # calculate sparsity
         self.sparsity = self.conv.weight.data.numel() - self.conv.weight.data.nonzero().size(0)
-        
+
     # Group Lasso for v1 chunk pruning
     def compute_group_lasso_v1(self):
         chunk_size = self.chunk_size

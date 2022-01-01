@@ -68,6 +68,8 @@ def spar_reg_func(model, loss, spar_method=None, finetune=False):
             for n, m in model.named_modules():
                 if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                     reg_loss += m.compute_group_lasso_v2()
+        elif spar_method == 'None':
+            reg_loss = 0.
         else:
             print("Sparsity regularizer {} not supported!".format(spar_method))
             exit(0)
