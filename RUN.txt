@@ -10,3 +10,9 @@ CUDA_VISIBLE_DEVICES=2,3 python -m torch.distributed.launch --nproc_per_node=2 -
 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 run.py --model efficientnet --dataset ImageNet --batch 512 --epochs 120 --epochs-ft 50 --spar-str 5e-4 --lr 1e-4 --lr-ft 1e-4 --reg-ft 1e-4 --scheduler=coswm
 
 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 run.py --model efficientnet --dataset ImageNet --batch 512 --epochs 117 --epochs-ft 50 --spar-str 5e-4 --lr 1e-4 --lr-ft 1e-4 --reg-ft 1e-4 --scheduler=coswm --ckpt-dir <INSERT TRAINED PATH HERE> --prune --prune-type cascade --q 0.75
+
+## Cambricon-S AlexNet training commands
+
+python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 run.py --model alexnet --dataset ImageNet --batch 512 --epochs 120 --epochs-ft 50 --spar-str 1e-4 --lr 1e-4 --lr-ft 1e-4 --reg-ft 1e-4 --scheduler=coswm --spar-reg v1
+
+python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 run.py --model alexnet --dataset ImageNet --batch 512 --epochs 120 --epochs-ft 50 --spar-str 1e-4 --lr 1e-4 --lr-ft 1e-4 --reg-ft 1e-4 --scheduler=coswm --spar-reg v1 --ckpt-dir <INSERT TRAINED PATH HERE> --prune --prune-type cs --q 0.75
