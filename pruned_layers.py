@@ -45,11 +45,18 @@ class PrunedLinear(nn.Module):
         :param q: pruning percentile. 'q' percent of the least 
         significant weight parameters will be pruned.
         """
+        """
         # get bounds
         max = torch.max(torch.abs(self.linear.weight.data))
         min = torch.min(torch.abs(self.linear.weight.data))
         # calculate cutoff
         cutoff = ((max - min) * (q / 100.0)) + min
+        """
+        assert (q >= 0 and q <= 1.0)
+        # find the cutoff
+        size = self.linear.weight.data.numel()
+        cutoff_idx = math.ceil(q*size)
+        cutoff = self.linear.weight.data.detach().cpu().numpy().argpartition(cutoff_idx)[cutoff_idx]
         # generate mask
         self.mask = torch.abs(self.linear.weight.data) > cutoff
         # prune the weights
@@ -340,24 +347,38 @@ class PrunedConv(nn.Module):
         #out = quant8(out, None)
         return out
 
-    def prune_by_percentage(self, q=5.0):
+    def prune_by_percentage(self, q=0.1):
         """
         Pruning the weight paramters by threshold.
         :param q: pruning percentile. 'q' percent of the least 
         significant weight parameters will be pruned.
         """
-        
+        """
         # get bounds
         max = torch.max(torch.abs(self.conv.weight.data))
         min = torch.min(torch.abs(self.conv.weight.data))
         # calculate cutoff
         cutoff = ((max - min) * (q / 100.0)) + min
+        """
+        assert (q >= 0 and q <= 1.0)
+	# find the cutoff
+        size = self.conv.weight.data.numel()
+        cutoff_idx = math.ceil(q*size)
+        cutoff = self.conv.weight.data.detach().cpu().numpy().argpartition(cutoff_idx)[cutoff_idx]
         # generate mask
         self.mask = torch.abs(self.conv.weight.data) > cutoff
         # prune the weights
         self.conv.weight.data = self.conv.weight.float() * self.mask.float()
         # calculate sparsity
         self.sparsity = self.conv.weight.data.numel() - self.conv.weight.data.nonzero().size(0)
+
+
+        assert (q >= 0 and q <= 1.0)
+        # find the cutoff
+        size = self.conv.weight.data.numel()
+        cutoff_idx = math.ceil(q*size)
+        cutoff = self.conv.weight.data.detach().cpu().numpy().argpartition(cutoff_idx)[cutoff_idx]
+        
         
 
     def prune_by_std(self, q=0.25):

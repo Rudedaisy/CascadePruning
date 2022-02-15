@@ -24,7 +24,8 @@ import statistics
 
 from prune import prune
 
-skipLinearExport = True
+skipLinearExport = False
+skipLinear = False
 
 #parser = argparse.ArgumentParser(description='Quick analysis')
 #parser.add_argument('--path', type=str, default='', help='file to load pretrained weights from')
@@ -33,16 +34,19 @@ skipLinearExport = True
 
 #assert (args.path != '')
 
-EXPORT_PATH = "/root/hostCurUser/reproduce/DNNsim/net_traces/VGG16_CIFAR10_CSP/"
-#EXPORT_PATH = "foo/"
-MODEL_PATH = "/root/hostCurUser/reproduce/DNNsim/models/VGG16_CIFAR10_CSP/"
-#MODEL_PATH = "foo/"
+#EXPORT_PATH = "/root/hostCurUser/reproduce/DNNsim/net_traces/VGG16_CIFAR10_CSP/"
+EXPORT_PATH = "foo/"
+#MODEL_PATH = "/root/hostCurUser/reproduce/DNNsim/models/VGG16_CIFAR10_CSP/"
+MODEL_PATH = "foo/"
 
-SCALE_PATH = "/root/hostCurUser/root/SCALE-Sim-cascade/topologies/conv_nets/VGG16_CIFAR10.csv"
+#SCALE_PATH = "/root/hostCurUser/root/SCALE-Sim-cascade/topologies/conv_nets/VGG16_CIFAR10.csv"
 #SCALE_PATH = "/root/hostCurUser/root/SCALE-Sim-cascade/topologies/transformer/Transformer.csv"
-CX_PATH = "/root/hostCurUser/reproduce/cambriconx/data/vgg16/cifar10/"
+SCALE_PATH = "foo/foo.csv"
+#CX_PATH = "/root/hostCurUser/reproduce/cambriconx/data/vgg16/cifar10/"
+CX_PATH = "/root/hostCurUser/reproduce/cambriconx/data/cambricons/transformer/wmt/"
 #CX_PATH = "foo/"
-ST_PATH = "/root/hostCurUser/reproduce/SparTen/data/"
+#ST_PATH = "/root/hostCurUser/reproduce/SparTen/data/"
+ST_PATH = "foo/"
 LAYER_IDX = 0
 
 class DataExporter(nn.Module):
@@ -142,6 +146,7 @@ def replace_vgg16(model, skipLinear=False):
     return model
         
 def exportData(pathName, modelName):
+    global skipLinear
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if modelName=="vgg16_c10":
         model = vgg16.VGG16()
@@ -149,7 +154,7 @@ def exportData(pathName, modelName):
         model = vgg16_old.VGG16()
     elif modelName=="resnet50_c10":
         model = resnet.ResNet50()
-    elif modelName=="inception_v3_c10":
+    elif modelName=="inceptionv3_c10":
         model = inception_v3_c10.inception_v3()
     elif modelName=="alexnet_in":
         #model = torch.hub.load('pytorch/vision', 'alexnet', pretrained=True)
@@ -182,7 +187,7 @@ def exportData(pathName, modelName):
         if not torch.distributed.is_initialized():
             port = np.random.randint(10000, 65536)
             torch.distributed.init_process_group(backend='nccl', init_method='tcp://127.0.0.1:%d'%port, rank=0, world_size=1)
-        model = torch.nn.parallel.DistributedDataParallel(model)
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[0], output_device=0)
 
     if not ("transformer" in modelName):
         model.load_state_dict(torch.load(pathName))
@@ -564,12 +569,20 @@ def main():
     #PATH = "ckpt/finetune_VGG1601261725/pruned_weight_48_0.89.pt"
 
     #PATH = '/root/hostCurUser/root/CascadePruning/ckpt/ResNet03270957/retrain_weight_73_0.94.pt'
-    PATH = '/root/hostCurUser/root/CascadePruning/ckpt/VGG1603261948/retrain_weight_38_0.92.pt'
+    #PATH = '/root/hostCurUser/root/CascadePruning/ckpt/VGG1603261948/retrain_weight_38_0.92.pt'
     #PATH = '/root/hostCurUser/root/CascadePruning/ckpt/Inception304112240/retrain_weight_74_0.94.pt'
     #PATH = '/root/hostCurUser/root/SCALE-Sim-cascade/topologies/conv_nets/VGG16_1e-4_5e-4_ft_q0.75_1e-4_5e-4_70.89.pt'
     #PATH = '/root/hostCurUser/root/SCALE-Sim-cascade/topologies/conv_nets/AlexNet_1e-4_1e-4_ft_q1.0_1e-4_5e-4_55.62.pt'
     #PATH = '/root/hostCurUser/root/CascadePruning/ckpt/DistributedDataParallel04052011/retrain_weight_27_69.35.pt'
     #PATH = '/root/hostCurUser/attention-is-all-you-need-pytorch/output/pruned_attention2/finetuned_model.chkpt'
+
+    # Cambricon-S files
+    #PATH = '/root/hostCurUser/root/CascadePruning/ckpt/VGG1612261703/retrain_weight_92_0.93.pt'
+    #PATH = '/root/hostCurUser/root/CascadePruning/ckpt/ResNet12301237/retrain_weight_84_0.94.pt'
+    #PATH = '/root/hostCurUser/root/CascadePruning/ckpt/Inception301011410/retrain_weight_90_0.94.pt'
+    #PATH = '/root/hostCurUser/CambriconS_trained_ext/CambriconS_AlexNet_5e-4_5e-4_ft_q0.75_1e-4_5e-4_56.84.pt'
+    #PATH = '/root/hostCurUser/CambriconS_trained_ext/cambs_vgg16_71.27.pt'
+    PATH = '/root/hostCurUser/attention-is-all-you-need-pytorch/output/cs1/finetune_model.chkpt'
     
     #layers = loadCoeffIdx(PATH)
     #nonzeros = 0
@@ -581,7 +594,7 @@ def main():
     #    tot += tot_subrows
     #print("Chunk sparsity: {}".format(1 - (float(nonzeros) / tot)))
         
-    exportData(PATH, "vgg16_c10")
+    exportData(PATH, "transformer_wmt")
     
 if __name__ == "__main__":
     main()
