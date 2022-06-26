@@ -6,6 +6,7 @@ import torch
 import numpy as np
 from prune import prune
 from pruned_layers import *
+from NM_pruned_layers import NMSparseConv, NMSparseLinear
 import argparse
 import sys
 
@@ -18,6 +19,7 @@ import numpy as np
 from models import utils
 from models import vgg16, vgg_in, resnet, resnet_in, inception_v3, inception_v3_c10, mobilenetv3
 from models import helpers
+from models.extract import export
 from models.efficientnet.model import EfficientNet
 from models.efficientnet.utils import Conv2dStaticSamePadding
 
@@ -25,7 +27,7 @@ parser = argparse.ArgumentParser(description='Bounded Structured Sparsity')
 
 parser.add_argument('--skip-pt', action='store_true', default=False, help='skip pretrain and simply load weights directly')
 parser.add_argument('--path', type=str, default='', help='file to load pretrained weights from')
-parser.add_argument('--model', type=str, default='vgg16', help='model to use, options: [vgg16, resnet50, inception_v3, alexnet]')
+parser.add_argument('--model', type=str, default='vgg16', help='model to use, options: [vgg16, resnet18, resnet50, inception_v3, alexnet]')
 parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset to train on: [CIFAR10, ImageNet]')
 parser.add_argument("--data-dir", type=str, default='/root/hostPublic/ImageNet/', help="the path to dataset folder.")
 
@@ -35,7 +37,7 @@ parser.add_argument('--batch', type=int, default=128, help='pretrain and finetun
 parser.add_argument('--lr', type=float, default=0.01, help='pretrain initial learning rate, default=0.01')
 parser.add_argument('--reg', type=float, default=5e-4, help='pretrain reg strength, default=5e-4')
 parser.add_argument('--scheduler', type=str, default='cosine', help="scheduler ['step', 'cosine','coswm']")
-parser.add_argument('--spar-reg', type=str, default='v2', help='sparsity regularizer type, options: [None, v1, v2, SSL]')
+parser.add_argument('--spar-reg', type=str, default='v2', help='sparsity regularizer type, options: [None, v1, v2, SSL, NM]')
 parser.add_argument('--spar-str', type=float, default=1e-4, help='sparsity reg strength, default=1e-4')
 parser.add_argument('--scratch', action='store_false', default=True, help='train from scratch, default=False[ImageNet]')
 
@@ -50,8 +52,14 @@ parser.add_argument('--lr-ft', type=float, default=0.001, help='finetune initial
 parser.add_argument('--reg-ft', type=float, default=5e-6, help='finetune reg strength, default=5e-6')
 
 parser.add_argument("--local_rank", type=int, default=-1)
+parser.add_argument('--extract', action='store_true', default=False, help='Extract IFM and weight data from all relevant layers')
 
 args = parser.parse_args()
+
+if args.spar_reg == "NM":
+    fup = True
+else:
+    fup = False
 
 def set_seed(seed):
     random.seed(seed)
@@ -100,6 +108,11 @@ if args.model == "vgg16":
         model = vgg_in.vgg16(pretrained=args.scratch)
     else:
         model = vgg16.VGG16()
+elif args.model == "resnet18":
+    if args.dataset == "ImageNet":
+        model = resnet_in.resnet18(pretrained=args.scratch)
+    else:
+        model = resnet.ResNet18()
 elif args.model == "resnet50":
     if args.dataset == "ImageNet":
         model = resnet_in.resnet50(pretrained=args.scratch)
@@ -137,37 +150,49 @@ model = model.to(device)
 #for layer in model.named_modules():
 #    print(layer)
     
-def replace_with_pruned(m, name):    
+def replace_with_pruned(m, name, spar_reg):    
     #print(m)
     print("{}, {}".format(name, str(type(m))))
-    if type(m) == PrunedConv or type(m) == PrunedLinear:
+    if type(m) == PrunedConv or type(m) == PrunedLinear or type(m) == NMSparseConv or type(m) == NMSparseLinear:
         return
 
     # HACK: directly replace conv layers of downsamples
     if name == "downsample":
-        m[0] = PrunedConv(m[0], args.chunk_size)
+        if spar_reg == "NM":
+            m[0] = NMSparseConv(m[0])
+        else:
+            m[0] = PrunedConv(m[0], args.chunk_size)
     
     for attr_str in dir(m):
         target_attr = getattr(m, attr_str)
         if type(target_attr) == torch.nn.Conv2d or type(target_attr) == Conv2dStaticSamePadding:
             print("Replaced CONV")
-            setattr(m, attr_str, PrunedConv(target_attr, args.chunk_size))
+            if spar_reg == "NM":
+                setattr(m, attr_str, NMSparseConv(target_attr))
+            else:
+                setattr(m, attr_str, PrunedConv(target_attr, args.chunk_size))
         elif type(target_attr) == torch.nn.Linear:
             print("Replaced Linear")
-            setattr(m, attr_str, PrunedLinear(target_attr, args.chunk_size))
+            if spar_reg == "NM":
+                setattr(m, attr_str, NMSparseLinear(target_attr))
+            else:
+                setattr(m, attr_str, PrunedLinear(target_attr, args.chunk_size))
 
     for n, ch in m.named_children():
-        replace_with_pruned(ch, n)
+        replace_with_pruned(ch, n, spar_reg)
 
 
 if args.model != "vgg16" and args.model != "alexnet":
-    replace_with_pruned(model, "model")
+    replace_with_pruned(model, "model", args.spar_reg)
 else:
     for i in range(len(model.features)):
         print(model.features[i])
         if isinstance(model.features[i], torch.nn.Conv2d):
             print("Replaced CONV")
-            model.features[i] = PrunedConv(model.features[i], args.chunk_size)
+            if args.spar_reg == "NM":
+                model.features[i] = NMSparseConv(model.features[i])
+            else:
+                model.features[i] = PrunedConv(model.features[i], args.chunk_size)
     #for i in range(len(model.classifier)):
     #    if isinstance(model.classifier[i], torch.nn.Linear):
     #        print("Replaced Linear")
@@ -177,7 +202,18 @@ if local_rank == 0:
         
     for layer in model.named_modules():
         print(layer)
-print("WARNING: only CONV layers are targetted for pruning")
+print("WARNING (for CSP reg): only CONV layers are targetted for pruning")
+
+model = model.to(device)
+
+if args.extract:
+    print("Extracting model. No training.")
+    if args.dataset == "ImageNet":
+        IFM = torch.rand(1, 3, 224, 224).cuda()
+    else:
+        IFM = torch.rand(1, 3, 32, 32).cuda()
+    export(model, args.model, IFM, "extract/")
+    exit(0)
 
 # Uncomment to load pretrained weights
 #model.load_state_dict(torch.load("model_before_pruning.pt"))
@@ -195,7 +231,7 @@ if not args.skip_pt:
     elif args.dataset == "ImageNet":
         utils.train_imagenet(model, epochs=args.epochs, batch_size=eff_bs, lr=eff_lr, reg=args.reg, device=device,
                              checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
-                             scheduler=args.scheduler, data_dir=args.data_dir, finetune=False, amp=True, lmdb=True)
+                             scheduler=args.scheduler, data_dir=args.data_dir, finetune=False, amp=True, lmdb=True, find_unused_parameters=fup)
     else:
         print("Dataset {} not suported!".format(args.dataset))
         sys.exit(0)
@@ -218,6 +254,9 @@ pickle.dump(model, open("foo.pkl","wb"))
 
 if not args.prune:
     print("Option to prune and finetune not chosen. Exiting")
+    sys.exit(0)
+if args.spar_reg == "NM":
+    print("No pruning/finetuning necessary with NM sparsity")
     sys.exit(0)
 
 # --------------------------------------- #
@@ -252,7 +291,7 @@ if args.dataset=="CIFAR10":
 elif args.dataset == "ImageNet":
     utils.train_imagenet(model, epochs=args.epochs_ft, batch_size=eff_bs, lr=eff_lr_ft, reg=args.reg, device=device,
                          checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
-                         scheduler=args.scheduler, data_dir=args.data_dir, finetune=True, amp=True, lmdb=True)
+                         scheduler=args.scheduler, data_dir=args.data_dir, finetune=True, amp=True, lmdb=True, find_unused_parameters=fup)
 else:
     print("Dataset {} not suported!".format(args.dataset))
     sys.exit(0)

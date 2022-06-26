@@ -68,6 +68,8 @@ def spar_reg_func(model, loss, spar_method=None, finetune=False):
             for n, m in model.named_modules():
                 if isinstance(m, PrunedConv) or isinstance(m, PrunedLinear):
                     reg_loss += m.compute_group_lasso_v2()
+        elif spar_method == "NM":
+            reg_loss = 0.
         elif spar_method == 'None':
             reg_loss = 0.
         else:
@@ -669,7 +671,7 @@ def eval_cifar10(model, batch_size=128):
 def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
                    checkpoint_path='', spar_reg=None, spar_param=0.0, device='cuda',
                    scheduler=None, finetune=False, cross=False, cross_interval=5,
-                   data_dir="/root/hostPublic/ImageNet/", amp=False, lmdb=False):
+                   data_dir="/root/hostPublic/ImageNet/", amp=False, lmdb=False, find_unused_parameters=False):
     # data_dir="../../ILSVRC/Data/CLS-LOC/", amp=False, lmdb=False
     # ):
 
@@ -681,7 +683,7 @@ def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
     # DistributedDataParallel will divide and allocate batch_size to all
     # available GPUs if device_ids are not set
     model = torch.nn.parallel.DistributedDataParallel(
-        model, device_ids=[local_rank], output_device=local_rank)
+        model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=find_unused_parameters)
 
     print("Loading Data...")
 
@@ -766,7 +768,7 @@ def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
            sampler=train_sampler, ena_amp=amp)
 
 
-def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=False, device='cuda'):
+def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=False, device='cuda', find_unused_parameters=False):
     torch.backends.cudnn.benchmark = True
     local_rank = torch.distributed.get_rank()
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -801,7 +803,7 @@ def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=Fal
     # DistributedDataParallel will divide and allocate batch_size to all
     # available GPUs if device_ids are not set
     model = torch.nn.parallel.DistributedDataParallel(
-        model, device_ids=[local_rank], output_device=local_rank)
+        model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=find_unused_parameters)
     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
     val_loader = torch.utils.data.DataLoader(
         val_dataset, batch_size=256, shuffle=False, sampler=val_sampler,
