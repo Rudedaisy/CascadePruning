@@ -768,7 +768,7 @@ def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
            sampler=train_sampler, ena_amp=amp)
 
 
-def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=False, device='cuda', find_unused_parameters=False):
+def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=False, device='cuda', find_unused_parameters=False, extract=False):
     torch.backends.cudnn.benchmark = True
     local_rank = torch.distributed.get_rank()
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -805,11 +805,16 @@ def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=Fal
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=find_unused_parameters)
     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=256, shuffle=False, sampler=val_sampler,
-        num_workers=8, pin_memory=True)
+    if extract:
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset, batch_size=3, shuffle=False, sampler=val_sampler,
+            num_workers=3, pin_memory=True)
+    else:
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset, batch_size=256, shuffle=False, sampler=val_sampler,
+            num_workers=8, pin_memory=True)
 
-    return _eval(model, val_loader, device)
+    return _eval(model, val_loader, device, extract)
 
 # Fix for 1x1 Conv layer's SGL
 
@@ -1098,7 +1103,7 @@ def compute_chunk_score_post(m, chunk_size, tol=0.0):
     return total_score.cpu().item() / n_chunks, total_nz_chunks, n_chunks * m.in_channels
 
 
-def _eval(model, testloader, device='cuda'):
+def _eval(model, testloader, device='cuda', extract=False):
     local_rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
 
@@ -1142,6 +1147,8 @@ def _eval(model, testloader, device='cuda'):
             inputs, targets = prefetcher.next()
             if batch_idx % 10 == 0 and local_rank == 0:
                 progress.display(batch_idx)
+            if extract:
+                return top1.avg, top5.avg
         if local_rank == 0:
             print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
                   .format(top1=top1, top5=top5))

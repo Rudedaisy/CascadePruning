@@ -23,6 +23,12 @@ from models.extract import export
 from models.efficientnet.model import EfficientNet
 from models.efficientnet.utils import Conv2dStaticSamePadding
 
+# Importing individual images for model extraction
+#import larq_zoo as lqz
+#from urllib3.request import urlopen
+#from PIL import Image
+
+
 parser = argparse.ArgumentParser(description='Bounded Structured Sparsity')
 
 parser.add_argument('--skip-pt', action='store_true', default=False, help='skip pretrain and simply load weights directly')
@@ -209,10 +215,13 @@ model = model.to(device)
 if args.extract:
     print("Extracting model. No training.")
     if args.dataset == "ImageNet":
-        IFM = torch.rand(1, 3, 224, 224).cuda()
+        #IFM = torch.rand(1, 3, 224, 224).cuda()
+        # Want a small batch size of 3 images
+        inference_func = utils.val_imagenet
     else:
-        IFM = torch.rand(1, 3, 32, 32).cuda()
-    export(model, args.model, IFM, "extract/")
+        print("ERR: extracting CIFAR10 image not supported yet")
+        exit(1)
+    export(model, args.model, "extract/", inference_func)
     exit(0)
 
 # Uncomment to load pretrained weights

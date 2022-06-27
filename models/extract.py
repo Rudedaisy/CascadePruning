@@ -12,7 +12,7 @@ LAYER_IDX = 0
 init(autoreset=True)
 """ --------------------- """
 
-def export(model, model_name, IFM, out_path):
+def export(model, model_name, out_path, inference_func):
     global LAYER_IDX
     
     model.eval()
@@ -23,7 +23,10 @@ def export(model, model_name, IFM, out_path):
 
         if isinstance(module, torch.nn.Conv2d) or issubclass(type(module), torch.nn.Conv2d):
             layer = module.weight.view((module.out_channels, -1)).detach().cpu().numpy()
-            weight = module.weight.detach().cpu().numpy()
+            if "get_sparse_weights" in dir(module):
+                weight = module.get_sparse_weights().detach().cpu().numpy()
+            else:
+                weight = module.weight.detach().cpu().numpy()
             tp = "conv"
             stride = str(max(module.stride[0], module.stride[1]))
             padding = str(max(module.padding[0], module.padding[1]))
@@ -34,7 +37,10 @@ def export(model, model_name, IFM, out_path):
             stride = module.stride
         elif isinstance(module, torch.nn.Linear) or issubclass(type(module), torch.nn.Linear):
             layer = module.weight.view((module.out_features, -1)).detach().cpu().numpy()
-            weight = module.weight.detach().cpu().reshape(module.weight.shape[0], module.weight.shape[1], 1, 1).numpy()
+            if "get_sparse_weights" in dir(module):
+                weight = module.get_sparse_weights().detach().cpu().numpy()
+            else:
+                weight = module.weight.detach().cpu().reshape(module.weight.shape[0], module.weight.shape[1], 1, 1).numpy()
             tp = "fc"
             stride = str(1)
             padding = str(0)
@@ -48,7 +54,7 @@ def export(model, model_name, IFM, out_path):
             return
         if len(input[0].shape) < 4:
             # FC layer
-            a = input[0].detach().cpu().reshape(1, module.in_features, 1, 1)
+            a = input[0].detach().cpu().reshape(-1, module.in_features, 1, 1)
         else:
             # CONV layer
             a = input[0].detach().cpu()
@@ -68,7 +74,8 @@ def export(model, model_name, IFM, out_path):
     for n, m in model.named_modules():
         m.register_forward_pre_hook(extract)
 
-    model(IFM)
+    #model(IFM)
+    inference_func(model, lmdb=True, amp=True, extract=True)
     
     with open(out_path+model_name+".h5", "wb") as f:
         pickle.dump(models, f)
