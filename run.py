@@ -22,6 +22,7 @@ from models import helpers
 from models.extract import export
 from models.efficientnet.model import EfficientNet
 from models.efficientnet.utils import Conv2dStaticSamePadding
+from models.MLP import MLP
 
 # Importing individual images for model extraction
 #import larq_zoo as lqz
@@ -33,7 +34,7 @@ parser = argparse.ArgumentParser(description='Bounded Structured Sparsity')
 
 parser.add_argument('--skip-pt', action='store_true', default=False, help='skip pretrain and simply load weights directly')
 parser.add_argument('--path', type=str, default='', help='file to load pretrained weights from')
-parser.add_argument('--model', type=str, default='vgg16', help='model to use, options: [vgg16, resnet18, resnet50, inception_v3, alexnet]')
+parser.add_argument('--model', type=str, default='vgg16', help='model to use, options: [vgg16, resnet18, resnet50, inception_v3, alexnet, mlp]')
 parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset to train on: [CIFAR10, ImageNet]')
 parser.add_argument("--data-dir", type=str, default='/root/hostPublic/ImageNet/', help="the path to dataset folder.")
 
@@ -148,6 +149,11 @@ elif args.model == "efficientnet":
 elif args.model == 'mbnetv3':
     model = mobilenetv3.mobilenetv3_large()
     model.load_state_dict(torch.load("ckpt/mobilenetv3-large-1cd25616.pth"))
+elif args.model == "mlp":
+    if args.dataset == "ImageNet":
+        print(f"Model {args.model} not supported!")
+    else:
+        model = MLP()
 else:
     print("Model {} not supported!".format(args.model))
     sys.exit(0)
@@ -219,8 +225,7 @@ if args.extract:
         # Want a small batch size of 3 images
         inference_func = utils.val_imagenet
     else:
-        print("ERR: extracting CIFAR10 image not supported yet")
-        exit(1)
+        inference_func = utils.eval_cifar10
     export(model, args.model, "extract/", inference_func)
     exit(0)
 
