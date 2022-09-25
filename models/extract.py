@@ -76,16 +76,19 @@ def export(model, model_name, out_path, run_func, backwards=False, train_dict=No
     def extract_backward(module, grad_input, grad_output):
         if isinstance(module, torch.nn.Conv2d) or issubclass(type(module), torch.nn.Conv2d):
             #grad_weight = module.weight.grad.detach().cpu().numpy()
-            a = grad_input[0].detach().cpu().numpy()
+            try:
+                a = grad_input[0].detach().cpu().numpy()
+            except:
+                a = np.array([-1])
             b = grad_output[0].detach().cpu().numpy()
         elif isinstance(module, torch.nn.Linear) or issubclass(type(module), torch.nn.Linear):
             #grad_weight = module.weight.grad.detach().reshape(module.weight.grad.shape[0], module.weight.grad.shape[1], 1, 1).numpy()
-            a = grad_input[0].detach().cpu().reshape(-1, module.in_features, 1, 1).numpy()
+            a = grad_input[0].detach().cpu().reshape(-1, module.out_features, 1, 1).numpy()
             b = grad_output[0].detach().cpu().reshape(-1, module.out_features, 1, 1).numpy()
         else:
             print(Style.DIM + "{} found during backwards. Ignored.".format(type(module)))
             return
-        print(Fore.BLUE + "Recording backwards {} with grad_weight, grad_input, grad_output shapes {}, {}, and {}".format(module.name, "N/A", grad_input[0].shape, grad_output[0].shape))
+        print(Fore.BLUE + "Recording backwards {} with grad_weight, grad_input, grad_output shapes {}, {}, and {}".format(module.name, "N/A", a.shape, b.shape))
         backs.append({'name' : module.name,
                       #'grad_weights' : grad_weight,
                       'grad_inputs' : a,
