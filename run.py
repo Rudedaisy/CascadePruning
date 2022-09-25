@@ -17,7 +17,7 @@ import random
 import numpy as np
 
 from models import utils
-from models import vgg16, vgg_in, resnet, resnet_in, inception_v3, inception_v3_c10, mobilenetv3
+from models import vgg16, vgg_in, resnet, resnet_in, inception_v3, inception_v3_c10, mobilenetv3, fc_mnist
 from models import helpers
 from models.extract import export
 from models.efficientnet.model import EfficientNet
@@ -34,8 +34,8 @@ parser = argparse.ArgumentParser(description='Bounded Structured Sparsity')
 
 parser.add_argument('--skip-pt', action='store_true', default=False, help='skip pretrain and simply load weights directly')
 parser.add_argument('--path', type=str, default='', help='file to load pretrained weights from')
-parser.add_argument('--model', type=str, default='vgg16', help='model to use, options: [vgg16, resnet18, resnet50, inception_v3, alexnet, mlp]')
-parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset to train on: [CIFAR10, ImageNet]')
+parser.add_argument('--model', type=str, default='vgg16', help='model to use, options: [vgg16, resnet18, resnet50, inception_v3, alexnet, mlp, fc_mnist]')
+parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset to train on: [MNIST, CIFAR10, ImageNet]')
 parser.add_argument("--data-dir", type=str, default='/root/hostPublic/ImageNet/', help="the path to dataset folder.")
 
 parser.add_argument('--ckpt-dir', type=str, default='', help='checkpoint save/load directory, default=ckpt/<modelName><time>/')
@@ -60,6 +60,7 @@ parser.add_argument('--reg-ft', type=float, default=5e-6, help='finetune reg str
 
 parser.add_argument("--local_rank", type=int, default=-1)
 parser.add_argument('--extract', action='store_true', default=False, help='Extract IFM and weight data from all relevant layers')
+parser.add_argument('--extract_backward', action='store_true', default=False, help='Extract input and weight gradients from backward pass')
 
 args = parser.parse_args()
 
@@ -110,6 +111,9 @@ if args.q == 0:
 # --- Full precision model load/train --- #
 # --------------------------------------- #
 
+if args.dataset == "MNIST" and args.model != "fc_mnist":
+    print(f"Dataset {args.dataset} not supported for model {args.model}")
+    exit(1)
 if args.model == "vgg16":
     if args.dataset == "ImageNet":
         model = vgg_in.vgg16(pretrained=args.scratch)
@@ -154,6 +158,11 @@ elif args.model == "mlp":
         print(f"Model {args.model} not supported!")
     else:
         model = MLP()
+elif args.model == "fc_mnist":
+    if args.dataset == "MNIST":
+        model = fc_mnist.FC_MNIST()
+    else:
+        print(f"Model {args.model} not supported!")
 else:
     print("Model {} not supported!".format(args.model))
     sys.exit(0)
@@ -194,17 +203,18 @@ def replace_with_pruned(m, name, spar_reg):
         replace_with_pruned(ch, n, spar_reg)
 
 
-if args.model != "vgg16" and args.model != "alexnet":
-    replace_with_pruned(model, "model", args.spar_reg)
-else:
-    for i in range(len(model.features)):
-        print(model.features[i])
-        if isinstance(model.features[i], torch.nn.Conv2d):
-            print("Replaced CONV")
-            if args.spar_reg == "NM":
-                model.features[i] = NMSparseConv(model.features[i])
-            else:
-                model.features[i] = PrunedConv(model.features[i], args.chunk_size)
+if args.spar_reg != "None":
+    if args.model != "vgg16" and args.model != "alexnet":
+        replace_with_pruned(model, "model", args.spar_reg)
+    else:
+        for i in range(len(model.features)):
+            print(model.features[i])
+            if isinstance(model.features[i], torch.nn.Conv2d):
+                print("Replaced CONV")
+                if args.spar_reg == "NM":
+                    model.features[i] = NMSparseConv(model.features[i])
+                else:
+                    model.features[i] = PrunedConv(model.features[i], args.chunk_size)
     #for i in range(len(model.classifier)):
     #    if isinstance(model.classifier[i], torch.nn.Linear):
     #        print("Replaced Linear")
@@ -218,14 +228,38 @@ print("WARNING (for CSP reg): only CONV layers are targetted for pruning")
 
 model = model.to(device)
 
-if args.extract:
+if args.extract_backward:
+    print("Extracting forward and backward passes")
+    if args.dataset == "ImageNet":
+        train_func = utils.train_imagenet
+        train_dict = {'model':model, 'epochs':args.epochs, 'batch_size':eff_bs, 'lr':eff_lr, 'reg':args.reg, 'device':device,
+                      'checkpoint_path':args.ckpt_dir, 'spar_reg':args.spar_reg, 'spar_param':args.spar_str,
+                      'scheduler':args.scheduler, 'data_dir':args.data_dir, 'finetune':False, 'amp':True, 'lmdb':True, 'find_unused_parameters':fup, 'extract':True}
+    elif args.dataset == "CIFAR10":
+        train_func = utils.train_cifar10
+        train_dict = {'model':model, 'epochs':args.epochs, 'batch_size':args.batch, 'lr':args.lr, 'reg':args.reg,
+                      'checkpoint_path':args.ckpt_dir, 'spar_reg':args.spar_reg, 'spar_param':args.spar_str,
+                      'scheduler':'step', 'finetune':False, 'cross':False, 'cross_interval':5, 'extract':True}
+        #elif args.dataset == "MNIST":
+        #    train_func = utils.train_mnist
+    else:
+        print(f"ERR: dataset {args.dataset} not supported")
+        exit(1)
+    export(model, args.model, "extract/", train_func, backwards=True, train_dict=train_dict)
+    exit(0)
+elif args.extract:
     print("Extracting model. No training.")
     if args.dataset == "ImageNet":
         #IFM = torch.rand(1, 3, 224, 224).cuda()
         # Want a small batch size of 3 images
         inference_func = utils.val_imagenet
-    else:
+    elif args.dataset == "CIFAR10":
         inference_func = utils.eval_cifar10
+    elif args.dataset == "MNIST":
+        inference_func = utils.eval_mnist
+    else:
+        print(f"ERR: dataset {args.dataset} not supported")
+        exit(1)
     export(model, args.model, "extract/", inference_func)
     exit(0)
 
@@ -237,8 +271,11 @@ if args.extract:
 #train(model, epochs=35, batch_size=128, lr=0.01, reg=0.005)
 #train(model, epochs=60, batch_size=128, lr=0.01, reg=1e-4, spar_reg='v2', spar_param=1e-4, checkpoint_path=args.ckpt_dir)
 if not args.skip_pt:
-    #train(args.dataset, model, finetune=False, epochs=args.epochs, batch_size=args.batch, lr=args.lr, reg=args.reg, spar_reg=args.spar_reg, spar_param=args.spar_str, checkpoint_path=args.ckpt_dir)
-    if args.dataset=="CIFAR10":
+    if args.dataset=="MNIST":
+        utils.train_mnist(model, epochs=args.epochs, batch_size=args.batch, lr=args.lr, reg=args.reg,
+                          checkpoint_path=args.ckpt_dir, spar_reg=args.spar_reg, spar_param=args.spar_str,
+                          finetune=False, cross=False, cross_interval=5)
+    elif args.dataset=="CIFAR10":
         utils.train_cifar10(model, epochs=args.epochs, batch_size=args.batch, lr=args.lr, reg=args.reg,
                             checkpoint_path = args.ckpt_dir, spar_reg = args.spar_reg, spar_param = args.spar_str,
                             scheduler='step', finetune=False, cross=False, cross_interval=5)

@@ -85,13 +85,15 @@ def train_mnist(model, epochs, batch_size=256, lr=0.01, reg=5e-4, checkpoint_pat
     data_train = MNIST('./data/mnist',
                        download=True,
                        transform=transforms.Compose([
-                           transforms.Resize((32, 32)),
+                           #transforms.Resize((32, 32)),
+                           transforms.Resize((28,28)),
                            transforms.ToTensor()]))
     data_test = MNIST('./data/mnist',
                       train=False,
                       download=True,
                       transform=transforms.Compose([
-                          transforms.Resize((32, 32)),
+                          #transforms.Resize((32, 32)),
+                          transforms.Resize((28,28)),
                           transforms.ToTensor()]))
     train_loader = torch.utils.data.DataLoader(
         data_train, batch_size=batch_size, shuffle=True, num_workers=2)
@@ -197,7 +199,7 @@ def train_mnist(model, epochs, batch_size=256, lr=0.01, reg=5e-4, checkpoint_pat
         print("Test Loss=%.4f, Test acc=%.4f" %
               (test_loss / (num_val_steps), val_acc))
 
-        if spar_reg is not None:
+        if spar_reg != "None":
             sparse = 0
             total = 0
             for n, m in model.named_parameters():
@@ -226,13 +228,14 @@ def train_mnist(model, epochs, batch_size=256, lr=0.01, reg=5e-4, checkpoint_pat
     return best_acc
 
 
-def eval_mnist(model):
+def eval_mnist(model, lmdb=False, amp=False, extract=False):
     print('==> Preparing data..')
     data_test = MNIST('./data/mnist',
                       train=False,
                       download=True,
                       transform=transforms.Compose([
-                          transforms.Resize((32, 32)),
+                          #transforms.Resize((32, 32)),
+                          transforms.Resize((28,28)),
                           transforms.ToTensor()]))
     test_loader = torch.utils.data.DataLoader(
         data_test, batch_size=1024, num_workers=2)
@@ -252,6 +255,8 @@ def eval_mnist(model):
             _, predicted = outputs.max(1)
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
+            if extract:
+                return correct / total
     num_val_steps = len(test_loader)
     val_acc = correct / total
     print("Test Loss=%.4f, Test acc=%.4f" %
@@ -465,7 +470,7 @@ def eval_cifar100(model, batch_size=128):
 
 def train_cifar10(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
                   checkpoint_path='', spar_reg=None, spar_param=0.0,
-                  scheduler='step', finetune=False, cross=False, cross_interval=5):
+                  scheduler='step', finetune=False, cross=False, cross_interval=5, extract=False):
     print('==> Preparing data..')
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
@@ -542,6 +547,8 @@ def train_cifar10(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
             loss += reg_loss * spar_param
 
             loss.backward()
+            if extract:
+                return 0
 
             # if finetune:
             #    for n, m in model.named_parameters():
@@ -675,7 +682,7 @@ def eval_cifar10(model, batch_size=128, extract=False, lmdb=False, amp=False):
 def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
                    checkpoint_path='', spar_reg=None, spar_param=0.0, device='cuda',
                    scheduler=None, finetune=False, cross=False, cross_interval=5,
-                   data_dir="/root/hostPublic/ImageNet/", amp=False, lmdb=False, find_unused_parameters=False):
+                   data_dir="/root/hostPublic/ImageNet/", amp=False, lmdb=False, find_unused_parameters=False, extract=False):
     # data_dir="../../ILSVRC/Data/CLS-LOC/", amp=False, lmdb=False
     # ):
 
@@ -769,7 +776,7 @@ def train_imagenet(model, epochs=100, batch_size=128, lr=0.01, reg=5e-4,
            scheduler, checkpoint_path, finetune=finetune, device=device,
            cross=cross, cross_interval=cross_interval,
            spar_method=spar_reg, spar_reg=spar_param,
-           sampler=train_sampler, ena_amp=amp)
+           sampler=train_sampler, ena_amp=amp, extract=extract)
 
 
 def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=False, device='cuda', find_unused_parameters=False, extract=False):
@@ -811,8 +818,8 @@ def val_imagenet(model, valdir="/root/hostPublic/ImageNet/", lmdb=False, amp=Fal
     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
     if extract:
         val_loader = torch.utils.data.DataLoader(
-            val_dataset, batch_size=3, shuffle=False, sampler=val_sampler,
-            num_workers=3, pin_memory=True)
+            val_dataset, batch_size=256, shuffle=False, sampler=val_sampler,
+            num_workers=4, pin_memory=True)
     else:
         val_loader = torch.utils.data.DataLoader(
             val_dataset, batch_size=256, shuffle=False, sampler=val_sampler,
@@ -842,7 +849,7 @@ def compute_sgl(m, chunk_size=32):
 
 def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
            checkpoint_path='', save_interval=2, device='cuda', finetune=False,
-           cross=False, cross_interval=5, spar_method=None, spar_reg=0.0, sampler=None, ena_amp=False):
+           cross=False, cross_interval=5, spar_method=None, spar_reg=0.0, sampler=None, ena_amp=False, extract=False):
 
     local_rank = torch.distributed.get_rank()
 
@@ -962,6 +969,8 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                     #print("Loss of reg: {}".format(reg_loss * spar_reg))
                     loss += reg_loss * spar_reg
                 scaler.scale(loss).backward()
+                if extract:
+                    return 0
                 losses.update(scaler.scale(loss).item(), inputs.size(0))
             else:
                 outputs = model(inputs)
@@ -1001,6 +1010,8 @@ def _train(model, trainloader, testloader,  optimizer, epochs, scheduler=None,
                             reg_loss += m.gl_loss
                 loss += reg_loss * spar_reg
                 loss.backward()
+                if extract:
+                    return 0
                 losses.update(loss.item(), inputs.size(0))
 
             acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
@@ -1151,7 +1162,7 @@ def _eval(model, testloader, device='cuda', extract=False):
             inputs, targets = prefetcher.next()
             if batch_idx % 10 == 0 and local_rank == 0:
                 progress.display(batch_idx)
-            if extract:
+            if extract and batch_idx > 10:
                 return top1.avg, top5.avg
         if local_rank == 0:
             print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
